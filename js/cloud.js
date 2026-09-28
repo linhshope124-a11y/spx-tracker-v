@@ -20,10 +20,12 @@ function buildPayload() {
     version: APP_VERSION,
     exportedAt: new Date().toISOString(),
     settings: {
-      vndRate: state.vndRate,
       rankName: state.rankName,
       rankBonus: state.rankBonus,
-      theme: localStorage.getItem(STORAGE_KEYS.theme) || 'light'
+      theme: localStorage.getItem(STORAGE_KEYS.theme) || 'light',
+      manualPoints: state.manualPoints,
+      manualSalary: state.manualSalary,
+      salaryDays: state.salaryDays
     },
     data: state.appData
   };
@@ -129,7 +131,6 @@ export async function pullFromCloud() {
       return: parsed.data.return || []
     };
     if (parsed.settings) {
-      if (Number.isFinite(parsed.settings.vndRate)) state.vndRate = parsed.settings.vndRate;
       if (typeof parsed.settings.rankName === 'string') state.rankName = parsed.settings.rankName;
       if (Number.isFinite(parsed.settings.rankBonus)) state.rankBonus = parsed.settings.rankBonus;
       if (typeof parsed.settings.theme === 'string') {
@@ -137,6 +138,21 @@ export async function pullFromCloud() {
         document.documentElement.setAttribute('data-theme', parsed.settings.theme);
         const icon = document.getElementById('themeIcon');
         if (icon) icon.innerText = parsed.settings.theme === 'dark' ? '☀️' : '🌙';
+      }
+      if (parsed.settings.manualPoints) {
+        state.manualPoints = {
+          buuCuc: parsed.settings.manualPoints.buuCuc || 0,
+          taiXe:  parsed.settings.manualPoints.taiXe  || 0
+        };
+        localStorage.setItem('spx_manual_points', JSON.stringify(state.manualPoints));
+      }
+      if (Number.isFinite(parsed.settings.manualSalary)) {
+        state.manualSalary = parsed.settings.manualSalary;
+        localStorage.setItem('spx_manual_salary', state.manualSalary);
+      }
+      if (Number.isFinite(parsed.settings.salaryDays)) {
+        state.salaryDays = parsed.settings.salaryDays;
+        localStorage.setItem('spx_salary_days', state.salaryDays);
       }
     }
 
@@ -172,7 +188,7 @@ export function initCloudUI() {
   }
 
   if (!token)       setStatus('Chưa cấu hình — cần tạo token', 'idle');
-  else if (!gistId) setStatus('Đã có token — bấm "Backup"', 'idle');
+  else if (!gistId) setStatus('Đã có token — bấm "Backup ngay"', 'idle');
   else {
     const last = localStorage.getItem('spx_last_backup');
     setStatus(last ? `✅ Backup cuối: ${last}` : '✅ Đã cấu hình', 'ok');
