@@ -49,10 +49,6 @@ function applyImportedPayload(parsed) {
   localStorage.setItem(STORAGE_KEYS.vault,   JSON.stringify(state.appData));
 
   if (importedSettings) {
-    if (Number.isFinite(importedSettings.vndRate)) {
-      state.vndRate = importedSettings.vndRate;
-      localStorage.setItem(STORAGE_KEYS.rate, state.vndRate);
-    }
     if (typeof importedSettings.rankName === 'string') {
       state.rankName = importedSettings.rankName;
       localStorage.setItem(STORAGE_KEYS.rankName, state.rankName);
@@ -90,10 +86,12 @@ export function exportData() {
     version: APP_VERSION,
     exportedAt: new Date().toISOString(),
     settings: {
-      vndRate: state.vndRate,
       rankName: state.rankName,
       rankBonus: state.rankBonus,
-      theme: localStorage.getItem(STORAGE_KEYS.theme) || 'light'
+      theme: localStorage.getItem(STORAGE_KEYS.theme) || 'light',
+      manualPoints: state.manualPoints,
+      manualSalary: state.manualSalary,
+      salaryDays: state.salaryDays
     },
     data: state.appData
   };
