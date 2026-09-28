@@ -2,9 +2,11 @@ import { STORAGE_KEYS } from './config.js';
 
 export const state = {
   appData: { delivery: [], pickup: [], return: [] },
-  vndRate: 1000,
   rankBonus: 0,
   rankName: 'none',
+  manualPoints: { buuCuc: 0, taiXe: 0 },
+  manualSalary: 0,
+  salaryDays: 26,
   activeTab: 'overview',
   histFilter: 'all',
   overviewFilter: 'all',
@@ -21,10 +23,15 @@ export function loadState() {
   if (!d.delivery) d.delivery = [];
   if (!d.pickup)   d.pickup   = [];
   if (!d.return)   d.return   = [];
-  state.appData   = d;
-  state.vndRate   = parseFloat(localStorage.getItem(STORAGE_KEYS.rate)) || 1000;
+  state.appData = d;
   state.rankBonus = parseFloat(localStorage.getItem(STORAGE_KEYS.rank)) || 0;
   state.rankName  = localStorage.getItem(STORAGE_KEYS.rankName) || 'none';
+
+  const mp = JSON.parse(localStorage.getItem('spx_manual_points') || '{}');
+  state.manualPoints = { buuCuc: mp.buuCuc || 0, taiXe: mp.taiXe || 0 };
+
+  state.manualSalary = parseFloat(localStorage.getItem('spx_manual_salary')) || 0;
+  state.salaryDays   = parseInt(localStorage.getItem('spx_salary_days'), 10) || 26;
 }
 
 export function persistData() {
@@ -34,7 +41,6 @@ export function persistData() {
 }
 
 export function persistSettings() {
-  localStorage.setItem(STORAGE_KEYS.rate,     state.vndRate);
   localStorage.setItem(STORAGE_KEYS.rank,     state.rankBonus);
   localStorage.setItem(STORAGE_KEYS.rankName, state.rankName);
 }
