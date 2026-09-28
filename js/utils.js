@@ -4,7 +4,6 @@ export const _fmt = n => _nf.format(n);
 export const generateId  = () => Date.now() * 1000 + Math.floor(Math.random() * 1000);
 export const sanitizeInt = v  => { const n = parseInt(v, 10); return Number.isFinite(n) && n > 0 ? n : 0; };
 export const formatPts   = n  => _fmt(Math.round(n)) + ' Điểm';
-export const formatVnd   = n  => _fmt(Math.round(n)) + ' VNĐ';
 
 export function getTodayIso() {
   const d = new Date();
