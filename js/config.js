@@ -160,7 +160,6 @@ export const TABLE_6_DATA = TABLE_PICKUP_RETURN_DATA;
 export const STORAGE_KEYS = {
   records: 'spx_dual_records',
   vault:   'spx_backup_vault',
-  rate:    'spx_vnd_rate',
   rank:    'spx_rank_bonus',
   rankName:'spx_rank_name',
   theme:   'spx_theme'
