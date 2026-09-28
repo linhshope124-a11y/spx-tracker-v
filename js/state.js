@@ -31,7 +31,7 @@ export function loadState() {
   state.manualPoints = { buuCuc: mp.buuCuc || 0, taiXe: mp.taiXe || 0 };
 
   state.manualSalary = parseFloat(localStorage.getItem('spx_manual_salary')) || 0;
-  state.salaryDays   = parseInt(localStorage.getItem('spx_salary_days'), 10) || 26;
+  state.salaryDays = 26;
 }
 
 export function persistData() {
