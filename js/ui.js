@@ -145,18 +145,11 @@ export function closeModal(force) {
 }
 
 export function openSettingsModal() {
-  document.getElementById('rateVndInput').value = state.vndRate;
   if (typeof window.initCloudUI === 'function') window.initCloudUI();
   document.getElementById('settingsModal').classList.add('active');
 }
 export function closeSettingsModal() {
   document.getElementById('settingsModal').classList.remove('active');
-}
-export function saveSettings() {
-  state.vndRate = parseFloat(document.getElementById('rateVndInput').value) || 1000;
-  localStorage.setItem('spx_vnd_rate', state.vndRate);
-  closeSettingsModal();
-  updateAllViews();
 }
 
 export function openCoffeeModal()  { document.getElementById('coffeeModal').classList.add('active'); }
