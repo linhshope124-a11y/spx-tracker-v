@@ -97,10 +97,10 @@ function _updateAllViews() {
   const rankBonus = Math.round(rawBase * state.rankBonus);
 
   // === Ngày công ===
-  const salaryDays    = state.salaryDays || 26;
+  const salaryDays    = 26;
   const workedDays    = getWorkedDaysThisMonth();
   const effectiveDays = Math.min(workedDays, salaryDays);
-  const ratio         = salaryDays > 0 ? effectiveDays / salaryDays : 0;
+  const ratio         = effectiveDays / salaryDays;
 
   // === Điểm khoảng cách ===
   const manualBuuCuc    = state.manualPoints?.buuCuc || 0;
@@ -165,11 +165,9 @@ function _updateAllViews() {
 
   // === Update UI Lương ===
   const salaryBaseEl     = document.getElementById('salaryBaseInput');
-  const salaryDaysEl     = document.getElementById('salaryDaysInput');
   const salaryProgressEl = document.getElementById('salaryProgressText');
   const salaryPointsEl   = document.getElementById('salaryPointsDisplay');
   if (salaryBaseEl && document.activeElement !== salaryBaseEl) salaryBaseEl.value = salaryBase;
-  if (salaryDaysEl && document.activeElement !== salaryDaysEl) salaryDaysEl.value = salaryDays;
   if (salaryProgressEl) salaryProgressEl.innerText = `${workedDays}/${salaryDays} ngày`;
   if (salaryPointsEl)   salaryPointsEl.innerText   = '+' + formatPts(salaryPoints);
 
