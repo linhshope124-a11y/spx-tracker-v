@@ -1,9 +1,10 @@
-const CACHE = 'spx-tracker-v3';
+const CACHE = 'spx-tracker-v4';
 const STATIC_ASSETS = [
   './', './index.html', './manifest.json', './css/style.css',
   './js/main.js', './js/config.js', './js/utils.js', './js/state.js',
   './js/calc.js', './js/theme.js', './js/ocr.js', './js/ui.js',
-  './js/render.js', './js/entry.js', './js/backup.js'
+  './js/render.js', './js/entry.js', './js/backup.js',
+  './js/cloud.js', './js/undo.js', './js/charts.js'
 ];
 
 self.addEventListener('install', e => {
