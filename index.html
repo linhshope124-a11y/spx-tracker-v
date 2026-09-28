@@ -13,12 +13,13 @@
 <meta name="apple-mobile-web-app-title" content="SPX Tracker">
 <link rel="stylesheet" href="./css/style.css">
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script async src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script>
 </head>
 <body>
 
 <header class="top-nav">
   <div class="header-left">
-    <button class="btn btn-coffee" onclick="openCoffeeModal()">☕ Cafe</button>
+    <button class="btn btn-coffee" onclick="openCoffeeModal()">💝 Donate</button>
     <button class="btn" onclick="openSettingsModal()">⚙️ Tỷ Giá</button>
   </div>
   <div class="header-actions">
@@ -28,6 +29,14 @@
     <button class="btn btn-primary" onclick="openAddModal()">＋ Nhập</button>
   </div>
 </header>
+
+<div style="max-width:600px;margin:8px auto 0;padding:0 12px;text-align:center;font-size:10.5px;color:var(--text-muted);font-weight:600">
+  👁️ <span id="busuanzi_container_site_pv">Tổng: <b><span id="busuanzi_value_site_pv"></span></b> lượt</span>
+  &nbsp;·&nbsp;
+  👤 <span id="busuanzi_container_site_uv">Người dùng: <b><span id="busuanzi_value_site_uv"></span></b></span>
+  &nbsp;·&nbsp;
+  📅 Hôm nay: <b><span id="busuanzi_value_site_pv_today"></span></b>
+</div>
 
 <div class="period-bar">
   <span class="period-label">🗓️ Kỳ:</span>
@@ -92,6 +101,29 @@
             <div class="stat-card-item type-ret"><div class="stat-card-head"><span class="stat-card-title">📦 Hoàn</span></div><div class="stat-card-val" id="miniRetPoints">0 Điểm</div><div class="stat-card-foot"><b id="miniRetOrders">0 đơn</b></div></div>
           </div>
         </section>
+
+        <section class="card">
+          <div class="card-head">
+            <div><h2>📊 Biểu Đồ & Xu Hướng</h2><p>Thống kê trực quan</p></div>
+            <button class="btn" onclick="toggleCharts()" style="font-size:11px">📊 Xem</button>
+          </div>
+          <div id="chartsContainer" style="display:none">
+            <div id="chartsLoading" class="charts-loading">Đang tải biểu đồ...</div>
+            <div class="chart-box">
+              <div class="chart-title">📈 Sản lượng 7 ngày gần nhất</div>
+              <canvas id="chartTrend" height="180"></canvas>
+            </div>
+            <div class="chart-box">
+              <div class="chart-title">📉 Tích lũy 30 ngày</div>
+              <canvas id="chartCumulative" height="150"></canvas>
+            </div>
+            <div class="chart-box">
+              <div class="chart-title">🥧 Phân bổ theo loại</div>
+              <canvas id="chartPie" height="180"></canvas>
+            </div>
+          </div>
+        </section>
+
         <section class="card">
           <div class="card-head"><div><h2>🎯 Cơ Hội Tăng Điểm</h2><p>Số đơn cần thêm để đạt mốc tiếp theo</p></div></div>
           <div class="history-filter-bar" style="margin-top:0;margin-bottom:8px">
@@ -164,10 +196,13 @@
   </div>
 </div>
 
-<!-- Entry Modal -->
 <div class="modal-shade" id="entryModal">
   <div class="modal-box">
-    <div class="modal-box-head"><h3 id="modalTitle">Nhập Sản Lượng Ngày</h3><button class="modal-close-btn" onclick="closeModal()">✕</button></div>
+    <div class="modal-box-head">
+      <button class="modal-close-btn" id="backToBatchBtn" onclick="backToBatch()" style="display:none;font-size:11px;padding:5px 10px;background:var(--glass-sky);color:var(--glass-sky-text);border-radius:8px;font-weight:700;margin-right:auto;">← Batch</button>
+      <h3 id="modalTitle" style="flex:1;text-align:center;">Nhập Sản Lượng Ngày</h3>
+      <button class="modal-close-btn" onclick="closeModal()">✕</button>
+    </div>
     <div class="modal-body">
       <input type="hidden" id="editEntryId" value="">
       <input type="hidden" id="editEntryType" value="">
@@ -231,7 +266,6 @@
   </div>
 </div>
 
-<!-- Batch OCR Modal -->
 <div class="modal-shade" id="batchOcrModal">
   <div class="modal-box">
     <div class="modal-box-head">
@@ -251,15 +285,37 @@
   </div>
 </div>
 
-<!-- Settings Modal -->
 <div class="modal-shade" id="settingsModal" onclick="if(event.target===this)closeSettingsModal()">
   <div class="modal-box coffee-modal-box">
-    <div class="modal-box-head"><h3>⚙️ Cài Đặt Tỷ Giá</h3><button class="modal-close-btn" onclick="closeSettingsModal()">✕</button></div>
+    <div class="modal-box-head"><h3>⚙️ Cài Đặt</h3><button class="modal-close-btn" onclick="closeSettingsModal()">✕</button></div>
     <div class="modal-body">
       <p style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">Mặc định quy đổi <b>1 điểm = 1.000 VNĐ</b>.</p>
       <div>
         <label style="display:block;font-size:11.5px;font-weight:700;margin-bottom:4px">1 Điểm = bao nhiêu VNĐ?</label>
         <input type="number" inputmode="numeric" id="rateVndInput" class="input-control auto-clear" value="1000" min="0">
+      </div>
+
+      <hr style="margin:14px 0;border:none;border-top:1px solid var(--glass-border-subtle)">
+
+      <div style="margin-bottom:10px">
+        <div style="font-size:12.5px;font-weight:800;margin-bottom:4px">☁️ Cloud Backup (GitHub Gist)</div>
+        <p style="font-size:10.5px;color:var(--text-muted);margin-bottom:8px">Tự động lưu lên Cloud — không mất khi reset máy.</p>
+        <label style="display:block;font-size:11px;font-weight:700;margin-bottom:3px">GitHub Token:</label>
+        <input type="password" id="ghTokenInput" class="input-control" placeholder="ghp_..." style="font-family:monospace;font-size:11px">
+        <label style="display:block;font-size:11px;font-weight:700;margin:8px 0 3px">Gist ID:</label>
+        <input type="text" id="gistIdInput" class="input-control" placeholder="Tự động sau lần backup đầu" style="font-family:monospace;font-size:11px">
+        <label style="display:flex;align-items:center;gap:6px;font-size:11px;margin-top:10px;cursor:pointer">
+          <input type="checkbox" id="autoBackupToggle" style="width:auto;margin:0">
+          <span>Tự động backup sau mỗi lần thay đổi</span>
+        </label>
+        <div style="display:flex;gap:6px;margin-top:10px">
+          <button class="btn" onclick="testCloudConnection()" style="flex:1;font-size:11px">🔌 Kiểm tra</button>
+          <button class="btn btn-primary" onclick="pushToCloud()" style="flex:1;font-size:11px">☁️ Backup</button>
+        </div>
+        <div style="margin-top:6px">
+          <button class="btn" onclick="pullFromCloud()" style="width:100%;font-size:11px">⬇️ Khôi phục từ Cloud</button>
+        </div>
+        <div class="cloud-status idle" id="cloudStatus" style="margin-top:10px">Chưa cấu hình</div>
       </div>
     </div>
     <div class="modal-box-foot">
@@ -269,7 +325,6 @@
   </div>
 </div>
 
-<!-- Paste JSON Modal -->
 <div class="modal-shade" id="pasteJsonModal" onclick="if(event.target===this)closePasteJsonModal()">
   <div class="modal-box coffee-modal-box">
     <div class="modal-box-head"><h3>📝 Nhập Chuỗi JSON</h3><button class="modal-close-btn" onclick="closePasteJsonModal()">✕</button></div>
@@ -284,12 +339,17 @@
   </div>
 </div>
 
-<!-- Coffee Modal -->
 <div class="modal-shade" id="coffeeModal" onclick="if(event.target===this)closeCoffeeModal()">
   <div class="modal-box coffee-modal-box">
-    <div class="modal-box-head"><h3>☕ Mời Cafe Tác Giả</h3><button class="modal-close-btn" onclick="closeCoffeeModal()">✕</button></div>
+    <div class="modal-box-head">
+      <h3>💝 Ủng Hộ Tác Giả</h3>
+      <button class="modal-close-btn" onclick="closeCoffeeModal()">✕</button>
+    </div>
     <div class="modal-body">
-      <p style="font-size:12px;color:var(--text-secondary);margin-bottom:6px">Gửi tặng một ly cafe nếu công cụ này hỗ trợ tốt cho công việc của bạn nhé! ❤️</p>
+      <p style="font-size:12px;color:var(--text-secondary);margin-bottom:12px">
+        Nếu công cụ này hỗ trợ tốt cho công việc của bạn, hãy ủng hộ tác giả một chút nhé! ❤️
+      </p>
+
       <div class="coffee-account-box">
         <div>
           <div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase">MoMo / SĐT</div>
@@ -297,19 +357,32 @@
         </div>
         <button class="btn btn-primary" id="copyPhoneBtn" onclick="copyPhoneNumber()">📋 Chép</button>
       </div>
+
+      <div class="coffee-account-box" style="margin-top:10px">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase">Viettinbank</div>
+          <div class="phone-display" id="bankSTK" style="font-size:15px;letter-spacing:0.5px">106879606835</div>
+          <div style="font-size:10px;color:var(--text-muted);margin-top:2px">Chủ TK: LINH</div>
+        </div>
+        <button class="btn btn-primary" id="copyBankBtn" onclick="copyBankNumber()">📋 Chép</button>
+      </div>
+
     </div>
     <div class="modal-box-foot"><button class="btn" onclick="closeCoffeeModal()">Đóng</button></div>
   </div>
 </div>
 
-<!-- OCR Loading -->
+<div id="undoBanner" class="undo-banner">
+  <span id="undoMsg" style="flex:1">Đã thực hiện thay đổi</span>
+  <button class="undo-btn" onclick="undoLast()">↶ HOÀN TÁC</button>
+</div>
+
 <div id="ocrLoadingOverlay">
   <div class="spinner"></div>
   <div style="font-weight:700;font-size:14px;margin-bottom:4px" id="ocrStatusTitle">Đang quét ảnh...</div>
   <div style="font-size:12px;opacity:0.8" id="ocrStatusDesc">Vui lòng chờ trong giây lát</div>
 </div>
 
-<!-- OCR Lightbox -->
 <div id="ocrLightbox" onclick="closeOcrLightbox()">
   <button class="close-lb" onclick="closeOcrLightbox()">✕</button>
   <img id="ocrLightboxImg" alt="Ảnh phóng to">
