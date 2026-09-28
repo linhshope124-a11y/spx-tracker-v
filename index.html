@@ -95,49 +95,59 @@
               </div>
             </div>
           </div>
+
           <div class="stat-grid-reorganized">
             <div class="stat-card-item type-del"><div class="stat-card-head"><span class="stat-card-title">🚚 Giao</span></div><div class="stat-card-val" id="miniDelPoints">0 Điểm</div><div class="stat-card-foot"><b id="miniDelOrders">0 đơn</b></div></div>
             <div class="stat-card-item type-pick"><div class="stat-card-head"><span class="stat-card-title">📥 Lấy</span></div><div class="stat-card-val" id="miniPickPoints">0 Điểm</div><div class="stat-card-foot"><b id="miniPickOrders">0 đơn</b></div></div>
             <div class="stat-card-item type-ret"><div class="stat-card-head"><span class="stat-card-title">📦 Hoàn</span></div><div class="stat-card-val" id="miniRetPoints">0 Điểm</div><div class="stat-card-foot"><b id="miniRetOrders">0 đơn</b></div></div>
           </div>
 
-          <div class="manual-points-box" style="margin-top:10px;padding-top:10px;border-top:1px dashed rgba(148,163,184,0.3)">
-            <div style="font-size:11px;font-weight:700;color:var(--text-secondary);margin-bottom:8px">
-              ✨ Điểm khoảng cách (theo tháng)
+          <div style="margin-top:12px;padding-top:12px;border-top:1px dashed rgba(148,163,184,0.3)">
+            <div style="font-size:11px;font-weight:700;color:var(--text-secondary);margin-bottom:10px">
+              ✨ Điểm khoảng cách <span style="color:var(--text-muted);font-weight:500">(theo tháng)</span>
             </div>
-            <div class="manual-points-grid">
-              <div class="manual-point-item">
-                <label>Bưu cục (điểm/tháng)</label>
-                <input type="number" inputmode="numeric" id="manualBuuCucInput" class="input-control auto-clear" value="0" min="0" onchange="saveManualPoints()">
-              </div>
-              <div class="manual-point-item">
-                <label>Tài xế (điểm/tháng)</label>
-                <input type="number" inputmode="numeric" id="manualTaiXeInput" class="input-control auto-clear" value="0" min="0" onchange="saveManualPoints()">
+
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px dashed rgba(148,163,184,0.2)">
+              <span style="font-size:12px;font-weight:600;color:var(--text-primary)">🏢 Bưu cục</span>
+              <div style="display:flex;align-items:center;gap:6px">
+                <input type="number" inputmode="numeric" id="manualBuuCucInput" value="0" min="0" onchange="saveManualPoints()"
+                       style="width:90px;padding:6px 10px;border:1px solid var(--glass-border-subtle);border-radius:8px;background:var(--glass-surface);color:var(--spx-orange);font-size:14px;font-weight:800;text-align:right;outline:none;font-family:inherit;">
+                <span style="font-size:10px;color:var(--text-muted);white-space:nowrap">điểm/tháng</span>
               </div>
             </div>
-            <div style="margin-top:8px;padding:8px 10px;background:var(--glass-subtle);border-radius:8px;border:1px solid var(--glass-border-subtle);display:flex;justify-content:space-between;align-items:center">
-              <span style="font-size:11px;color:var(--text-secondary)" id="manualProgressText">0/26 ngày</span>
-              <b id="manualTotalDisplay" style="color:var(--spx-orange);font-size:13px">+0 Điểm</b>
+
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px dashed rgba(148,163,184,0.2)">
+              <span style="font-size:12px;font-weight:600;color:var(--text-primary)">🚗 Tài xế</span>
+              <div style="display:flex;align-items:center;gap:6px">
+                <input type="number" inputmode="numeric" id="manualTaiXeInput" value="0" min="0" onchange="saveManualPoints()"
+                       style="width:90px;padding:6px 10px;border:1px solid var(--glass-border-subtle);border-radius:8px;background:var(--glass-surface);color:var(--spx-orange);font-size:14px;font-weight:800;text-align:right;outline:none;font-family:inherit;">
+                <span style="font-size:10px;color:var(--text-muted);white-space:nowrap">điểm/tháng</span>
+              </div>
+            </div>
+
+            <div style="margin-top:10px;padding:10px 12px;background:var(--glass-subtle);border-radius:10px;border:1px solid var(--glass-border-subtle);display:flex;justify-content:space-between;align-items:center">
+              <span style="font-size:11.5px;color:var(--text-secondary);font-weight:600" id="manualProgressText">0/26 ngày</span>
+              <b id="manualTotalDisplay" style="color:var(--spx-orange);font-size:14px;font-weight:800">+0 Điểm</b>
             </div>
           </div>
 
-          <div class="manual-points-box" style="margin-top:10px;padding-top:10px;border-top:1px dashed rgba(148,163,184,0.3)">
-            <div style="font-size:11px;font-weight:700;color:var(--text-secondary);margin-bottom:8px">
-              💼 Lương cơ bản (tháng hiện tại)
+          <div style="margin-top:12px;padding-top:12px;border-top:1px dashed rgba(148,163,184,0.3)">
+            <div style="font-size:11px;font-weight:700;color:var(--text-secondary);margin-bottom:10px">
+              💼 Lương cơ bản <span style="color:var(--text-muted);font-weight:500">(theo tháng)</span>
             </div>
-            <div class="manual-points-grid">
-              <div class="manual-point-item">
-                <label>Lương tháng (điểm)</label>
-                <input type="number" inputmode="numeric" id="salaryBaseInput" class="input-control auto-clear" value="0" min="0" onchange="saveSalaryConfig()">
-              </div>
-              <div class="manual-point-item">
-                <label>Ngày công chuẩn</label>
-                <input type="number" inputmode="numeric" id="salaryDaysInput" class="input-control auto-clear" value="26" min="1" onchange="saveSalaryConfig()">
+
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px dashed rgba(148,163,184,0.2)">
+              <span style="font-size:12px;font-weight:600;color:var(--text-primary)">💵 Lương tháng</span>
+              <div style="display:flex;align-items:center;gap:6px">
+                <input type="number" inputmode="numeric" id="salaryBaseInput" value="0" min="0" onchange="saveSalaryConfig()"
+                       style="width:90px;padding:6px 10px;border:1px solid var(--glass-border-subtle);border-radius:8px;background:var(--glass-surface);color:var(--spx-orange);font-size:14px;font-weight:800;text-align:right;outline:none;font-family:inherit;">
+                <span style="font-size:10px;color:var(--text-muted);white-space:nowrap">điểm/tháng</span>
               </div>
             </div>
-            <div style="margin-top:8px;padding:8px 10px;background:var(--glass-subtle);border-radius:8px;border:1px solid var(--glass-border-subtle);display:flex;justify-content:space-between;align-items:center">
-              <span style="font-size:11px;color:var(--text-secondary)" id="salaryProgressText">0/26 ngày</span>
-              <b id="salaryPointsDisplay" style="color:var(--spx-orange);font-size:13px">+0 Điểm</b>
+
+            <div style="margin-top:10px;padding:10px 12px;background:var(--glass-subtle);border-radius:10px;border:1px solid var(--glass-border-subtle);display:flex;justify-content:space-between;align-items:center">
+              <span style="font-size:11.5px;color:var(--text-secondary);font-weight:600" id="salaryProgressText">0/26 ngày</span>
+              <b id="salaryPointsDisplay" style="color:var(--spx-orange);font-size:14px;font-weight:800">+0 Điểm</b>
             </div>
           </div>
         </section>
