@@ -5,6 +5,21 @@ import { formatPts, formatDateDisplay, _fmt } from './utils.js';
 
 const NEED_HIGHLIGHT = 'color:#dc2626;font-size:1.35em;font-weight:900;letter-spacing:0.5px;';
 
+// Đếm số ngày có record trong THÁNG HIỆN TẠI
+function getWorkedDaysThisMonth() {
+  const now = new Date();
+  const cy = now.getFullYear();
+  const cm = now.getMonth() + 1;
+  const dates = new Set();
+  ['delivery', 'pickup', 'return'].forEach(type => {
+    state.appData[type].forEach(r => {
+      const [ry, rm] = r.date.split('-').map(Number);
+      if (ry === cy && rm === cm) dates.add(r.date);
+    });
+  });
+  return dates.size;
+}
+
 function renderRow(weightLabel, orders, tier, typeClass) {
   return `<td class="weight-name">${weightLabel}</td>
     <td class="order-num ${typeClass} ${orders === 0 ? 'zero' : ''}">${_fmt(orders)}<div class="bar-container"><div class="bar-fill ${typeClass.replace('-num','')}" style="width:${tier.pct}%"></div></div></td>
@@ -78,13 +93,31 @@ function _updateAllViews() {
     ovBox.innerHTML = ovSuggBuf.join('');
   }
 
-  const rawBase    = delPts + pickPts + retPts;
-  const rankBonus  = Math.round(rawBase * state.rankBonus);
-  const finalTotal = rawBase + rankBonus;
+  const rawBase   = delPts + pickPts + retPts;
+  const rankBonus = Math.round(rawBase * state.rankBonus);
+
+  // === Ngày công ===
+  const salaryDays    = state.salaryDays || 26;
+  const workedDays    = getWorkedDaysThisMonth();
+  const effectiveDays = Math.min(workedDays, salaryDays);
+  const ratio         = salaryDays > 0 ? effectiveDays / salaryDays : 0;
+
+  // === Điểm khoảng cách ===
+  const manualBuuCuc    = state.manualPoints?.buuCuc || 0;
+  const manualTaiXe     = state.manualPoints?.taiXe  || 0;
+  const manualBuuCucPts = Math.round(manualBuuCuc * ratio);
+  const manualTaiXePts  = Math.round(manualTaiXe  * ratio);
+  const manualTotal     = manualBuuCucPts + manualTaiXePts;
+
+  // === Lương ===
+  const salaryBase   = state.manualSalary || 0;
+  const salaryPoints = Math.round(salaryBase * ratio);
+
+  const finalTotal  = rawBase + rankBonus + manualTotal + salaryPoints;
   const totalOrders = total.del + total.pick + total.ret;
 
   document.getElementById('overallTotalPoints').innerText  = formatPts(finalTotal);
-  document.getElementById('rankBonusDetailText').innerText = `Gốc: ${formatPts(rawBase)} · Thưởng: +${formatPts(rankBonus)}`;
+  document.getElementById('rankBonusDetailText').innerText = `Gốc: ${formatPts(rawBase)} · Thưởng: +${formatPts(rankBonus)} · K/cách: +${formatPts(manualTotal)} · Lương: +${formatPts(salaryPoints)}`;
   document.getElementById('overallTotalOrders').innerText  = `${_fmt(totalOrders)} đơn`;
 
   if (totalOrders > 0) {
@@ -129,6 +162,26 @@ function _updateAllViews() {
   document.getElementById('pickTotalOrders').innerText = `${_fmt(total.pick)} đơn`;
   document.getElementById('retTotalPoints').innerText  = formatPts(retPts);
   document.getElementById('retTotalOrders').innerText  = `${_fmt(total.ret)} đơn`;
+
+  // === Update UI Lương ===
+  const salaryBaseEl     = document.getElementById('salaryBaseInput');
+  const salaryDaysEl     = document.getElementById('salaryDaysInput');
+  const salaryProgressEl = document.getElementById('salaryProgressText');
+  const salaryPointsEl   = document.getElementById('salaryPointsDisplay');
+  if (salaryBaseEl && document.activeElement !== salaryBaseEl) salaryBaseEl.value = salaryBase;
+  if (salaryDaysEl && document.activeElement !== salaryDaysEl) salaryDaysEl.value = salaryDays;
+  if (salaryProgressEl) salaryProgressEl.innerText = `${workedDays}/${salaryDays} ngày`;
+  if (salaryPointsEl)   salaryPointsEl.innerText   = '+' + formatPts(salaryPoints);
+
+  // === Update UI Điểm khoảng cách ===
+  const buuCucInput      = document.getElementById('manualBuuCucInput');
+  const taiXeInput       = document.getElementById('manualTaiXeInput');
+  const totalDisplay     = document.getElementById('manualTotalDisplay');
+  const manualProgressEl = document.getElementById('manualProgressText');
+  if (buuCucInput && document.activeElement !== buuCucInput) buuCucInput.value = manualBuuCuc;
+  if (taiXeInput  && document.activeElement !== taiXeInput)  taiXeInput.value  = manualTaiXe;
+  if (manualProgressEl) manualProgressEl.innerText = `${workedDays}/${salaryDays} ngày`;
+  if (totalDisplay)     totalDisplay.innerText     = '+' + formatPts(manualTotal);
 
   const filteredCount =
     state.appData.delivery.filter(r => isDateInCurrentPeriod(r.date, state.periodFilter)).length +
