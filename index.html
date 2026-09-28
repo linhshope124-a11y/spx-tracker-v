@@ -20,7 +20,7 @@
 <header class="top-nav">
   <div class="header-left">
     <button class="btn btn-coffee" onclick="openCoffeeModal()">💝 Donate</button>
-    <button class="btn" onclick="openSettingsModal()">⚙️ Tỷ Giá</button>
+    <button class="btn" onclick="openSettingsModal()">💾 Backup</button>
   </div>
   <div class="header-actions">
     <button class="btn btn-ocr" onclick="document.getElementById('ocrFileInput').click()">📷 Quét</button>
@@ -99,6 +99,46 @@
             <div class="stat-card-item type-del"><div class="stat-card-head"><span class="stat-card-title">🚚 Giao</span></div><div class="stat-card-val" id="miniDelPoints">0 Điểm</div><div class="stat-card-foot"><b id="miniDelOrders">0 đơn</b></div></div>
             <div class="stat-card-item type-pick"><div class="stat-card-head"><span class="stat-card-title">📥 Lấy</span></div><div class="stat-card-val" id="miniPickPoints">0 Điểm</div><div class="stat-card-foot"><b id="miniPickOrders">0 đơn</b></div></div>
             <div class="stat-card-item type-ret"><div class="stat-card-head"><span class="stat-card-title">📦 Hoàn</span></div><div class="stat-card-val" id="miniRetPoints">0 Điểm</div><div class="stat-card-foot"><b id="miniRetOrders">0 đơn</b></div></div>
+          </div>
+
+          <div class="manual-points-box" style="margin-top:10px;padding-top:10px;border-top:1px dashed rgba(148,163,184,0.3)">
+            <div style="font-size:11px;font-weight:700;color:var(--text-secondary);margin-bottom:8px">
+              ✨ Điểm khoảng cách (theo tháng)
+            </div>
+            <div class="manual-points-grid">
+              <div class="manual-point-item">
+                <label>Bưu cục (điểm/tháng)</label>
+                <input type="number" inputmode="numeric" id="manualBuuCucInput" class="input-control auto-clear" value="0" min="0" onchange="saveManualPoints()">
+              </div>
+              <div class="manual-point-item">
+                <label>Tài xế (điểm/tháng)</label>
+                <input type="number" inputmode="numeric" id="manualTaiXeInput" class="input-control auto-clear" value="0" min="0" onchange="saveManualPoints()">
+              </div>
+            </div>
+            <div style="margin-top:8px;padding:8px 10px;background:var(--glass-subtle);border-radius:8px;border:1px solid var(--glass-border-subtle);display:flex;justify-content:space-between;align-items:center">
+              <span style="font-size:11px;color:var(--text-secondary)" id="manualProgressText">0/26 ngày</span>
+              <b id="manualTotalDisplay" style="color:var(--spx-orange);font-size:13px">+0 Điểm</b>
+            </div>
+          </div>
+
+          <div class="manual-points-box" style="margin-top:10px;padding-top:10px;border-top:1px dashed rgba(148,163,184,0.3)">
+            <div style="font-size:11px;font-weight:700;color:var(--text-secondary);margin-bottom:8px">
+              💼 Lương cơ bản (tháng hiện tại)
+            </div>
+            <div class="manual-points-grid">
+              <div class="manual-point-item">
+                <label>Lương tháng (điểm)</label>
+                <input type="number" inputmode="numeric" id="salaryBaseInput" class="input-control auto-clear" value="0" min="0" onchange="saveSalaryConfig()">
+              </div>
+              <div class="manual-point-item">
+                <label>Ngày công chuẩn</label>
+                <input type="number" inputmode="numeric" id="salaryDaysInput" class="input-control auto-clear" value="26" min="1" onchange="saveSalaryConfig()">
+              </div>
+            </div>
+            <div style="margin-top:8px;padding:8px 10px;background:var(--glass-subtle);border-radius:8px;border:1px solid var(--glass-border-subtle);display:flex;justify-content:space-between;align-items:center">
+              <span style="font-size:11px;color:var(--text-secondary)" id="salaryProgressText">0/26 ngày</span>
+              <b id="salaryPointsDisplay" style="color:var(--spx-orange);font-size:13px">+0 Điểm</b>
+            </div>
           </div>
         </section>
 
@@ -287,40 +327,48 @@
 
 <div class="modal-shade" id="settingsModal" onclick="if(event.target===this)closeSettingsModal()">
   <div class="modal-box coffee-modal-box">
-    <div class="modal-box-head"><h3>⚙️ Cài Đặt</h3><button class="modal-close-btn" onclick="closeSettingsModal()">✕</button></div>
+    <div class="modal-box-head">
+      <h3>💾 Backup & Cài Đặt</h3>
+      <button class="modal-close-btn" onclick="closeSettingsModal()">✕</button>
+    </div>
     <div class="modal-body">
-      <p style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">Mặc định quy đổi <b>1 điểm = 1.000 VNĐ</b>.</p>
-      <div>
-        <label style="display:block;font-size:11.5px;font-weight:700;margin-bottom:4px">1 Điểm = bao nhiêu VNĐ?</label>
-        <input type="number" inputmode="numeric" id="rateVndInput" class="input-control auto-clear" value="1000" min="0">
+      <div style="font-size:12.5px;font-weight:800;margin-bottom:4px">☁️ Cloud Backup (GitHub Gist)</div>
+      <p style="font-size:10.5px;color:var(--text-muted);margin-bottom:10px">Tự động lưu lên Cloud — reset máy không mất dữ liệu.</p>
+
+      <label style="display:block;font-size:11px;font-weight:700;margin-bottom:3px">GitHub Token:</label>
+      <input type="password" id="ghTokenInput" class="input-control" placeholder="ghp_..." style="font-family:monospace;font-size:11px">
+
+      <label style="display:block;font-size:11px;font-weight:700;margin:8px 0 3px">Gist ID:</label>
+      <input type="text" id="gistIdInput" class="input-control" placeholder="Tự động sau lần backup đầu" style="font-family:monospace;font-size:11px">
+
+      <label style="display:flex;align-items:center;gap:6px;font-size:11px;margin-top:10px;cursor:pointer">
+        <input type="checkbox" id="autoBackupToggle" style="width:auto;margin:0">
+        <span>Tự động backup sau mỗi lần thay đổi</span>
+      </label>
+
+      <div style="display:flex;gap:6px;margin-top:10px">
+        <button class="btn" onclick="testCloudConnection()" style="flex:1;font-size:11px">🔌 Kiểm tra</button>
+        <button class="btn btn-primary" onclick="pushToCloud()" style="flex:1;font-size:11px">☁️ Backup ngay</button>
       </div>
+      <div style="margin-top:6px">
+        <button class="btn" onclick="pullFromCloud()" style="width:100%;font-size:11px">⬇️ Khôi phục từ Cloud</button>
+      </div>
+
+      <div class="cloud-status idle" id="cloudStatus" style="margin-top:10px">Chưa cấu hình</div>
 
       <hr style="margin:14px 0;border:none;border-top:1px solid var(--glass-border-subtle)">
 
-      <div style="margin-bottom:10px">
-        <div style="font-size:12.5px;font-weight:800;margin-bottom:4px">☁️ Cloud Backup (GitHub Gist)</div>
-        <p style="font-size:10.5px;color:var(--text-muted);margin-bottom:8px">Tự động lưu lên Cloud — không mất khi reset máy.</p>
-        <label style="display:block;font-size:11px;font-weight:700;margin-bottom:3px">GitHub Token:</label>
-        <input type="password" id="ghTokenInput" class="input-control" placeholder="ghp_..." style="font-family:monospace;font-size:11px">
-        <label style="display:block;font-size:11px;font-weight:700;margin:8px 0 3px">Gist ID:</label>
-        <input type="text" id="gistIdInput" class="input-control" placeholder="Tự động sau lần backup đầu" style="font-family:monospace;font-size:11px">
-        <label style="display:flex;align-items:center;gap:6px;font-size:11px;margin-top:10px;cursor:pointer">
-          <input type="checkbox" id="autoBackupToggle" style="width:auto;margin:0">
-          <span>Tự động backup sau mỗi lần thay đổi</span>
-        </label>
-        <div style="display:flex;gap:6px;margin-top:10px">
-          <button class="btn" onclick="testCloudConnection()" style="flex:1;font-size:11px">🔌 Kiểm tra</button>
-          <button class="btn btn-primary" onclick="pushToCloud()" style="flex:1;font-size:11px">☁️ Backup</button>
-        </div>
-        <div style="margin-top:6px">
-          <button class="btn" onclick="pullFromCloud()" style="width:100%;font-size:11px">⬇️ Khôi phục từ Cloud</button>
-        </div>
-        <div class="cloud-status idle" id="cloudStatus" style="margin-top:10px">Chưa cấu hình</div>
-      </div>
+      <div style="font-size:11.5px;font-weight:700;color:var(--text-secondary);margin-bottom:8px">📖 Hướng dẫn lấy Token</div>
+      <ol style="font-size:10.5px;color:var(--text-muted);padding-left:18px;line-height:1.6;margin:0">
+        <li>Vào <b>github.com/settings/tokens</b></li>
+        <li>Bấm <b>Generate new token (classic)</b></li>
+        <li>Note: <code>spx-backup</code> · Expiration: <code>No expiration</code></li>
+        <li>Scope: tích <b>gist</b> · Bấm <b>Generate</b></li>
+        <li>Copy token (dạng <code>ghp_xxx...</code>) → paste vào ô trên</li>
+      </ol>
     </div>
     <div class="modal-box-foot">
-      <button class="btn" onclick="closeSettingsModal()">Hủy</button>
-      <button class="btn btn-primary" onclick="saveSettings()">Lưu</button>
+      <button class="btn btn-primary" onclick="closeSettingsModal()" style="width:100%">Đóng</button>
     </div>
   </div>
 </div>
@@ -349,7 +397,6 @@
       <p style="font-size:12px;color:var(--text-secondary);margin-bottom:12px">
         Nếu công cụ này hỗ trợ tốt cho công việc của bạn, hãy ủng hộ tác giả một chút nhé! ❤️
       </p>
-
       <div class="coffee-account-box">
         <div>
           <div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase">MoMo / SĐT</div>
@@ -357,7 +404,6 @@
         </div>
         <button class="btn btn-primary" id="copyPhoneBtn" onclick="copyPhoneNumber()">📋 Chép</button>
       </div>
-
       <div class="coffee-account-box" style="margin-top:10px">
         <div style="flex:1;min-width:0">
           <div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase">Viettinbank</div>
@@ -366,7 +412,6 @@
         </div>
         <button class="btn btn-primary" id="copyBankBtn" onclick="copyBankNumber()">📋 Chép</button>
       </div>
-
     </div>
     <div class="modal-box-foot"><button class="btn" onclick="closeCoffeeModal()">Đóng</button></div>
   </div>
