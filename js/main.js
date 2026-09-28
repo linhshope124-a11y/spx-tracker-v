@@ -4,7 +4,7 @@ import {
   switchMainTab, switchModalSubTab, setOverviewFilter, setPeriodFilter, setHistFilter,
   setRankTier, initRankUI,
   openAddModal, openEditModal, closeModal,
-  openSettingsModal, closeSettingsModal, saveSettings,
+  openSettingsModal, closeSettingsModal,
   openCoffeeModal, closeCoffeeModal, copyPhoneNumber, copyBankNumber
 } from './ui.js';
 import {
@@ -48,7 +48,7 @@ Object.assign(window, {
   switchMainTab, switchModalSubTab, setOverviewFilter, setPeriodFilter, setHistFilter,
   setRankTier,
   openAddModal, openEditModal, closeModal,
-  openSettingsModal, closeSettingsModal, saveSettings,
+  openSettingsModal, closeSettingsModal,
   openCoffeeModal, closeCoffeeModal, copyPhoneNumber, copyBankNumber,
   handleOcrImage, openOcrLightbox, closeOcrLightbox,
   openBatchOcrModal, closeBatchOcrModal, appendBatchFiles,
@@ -58,7 +58,21 @@ Object.assign(window, {
   copyDataJson, openPasteJsonModal, closePasteJsonModal,
   confirmImportJsonString, exportData, importData, restoreFromVault,
   testCloudConnection, pushToCloud, pullFromCloud, initCloudUI,
-  undoLast, toggleCharts
+  undoLast, toggleCharts,
+
+  saveManualPoints: function() {
+    state.manualPoints.buuCuc = parseInt(document.getElementById('manualBuuCucInput').value, 10) || 0;
+    state.manualPoints.taiXe  = parseInt(document.getElementById('manualTaiXeInput').value, 10) || 0;
+    localStorage.setItem('spx_manual_points', JSON.stringify(state.manualPoints));
+    updateAllViews();
+  },
+  saveSalaryConfig: function() {
+    state.manualSalary = parseFloat(document.getElementById('salaryBaseInput').value) || 0;
+    state.salaryDays   = parseInt(document.getElementById('salaryDaysInput').value, 10) || 26;
+    localStorage.setItem('spx_manual_salary', state.manualSalary);
+    localStorage.setItem('spx_salary_days', state.salaryDays);
+    updateAllViews();
+  }
 });
 
 (function init() {
