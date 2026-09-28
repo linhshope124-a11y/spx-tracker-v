@@ -68,9 +68,9 @@ Object.assign(window, {
   },
   saveSalaryConfig: function() {
     state.manualSalary = parseFloat(document.getElementById('salaryBaseInput').value) || 0;
-    state.salaryDays   = parseInt(document.getElementById('salaryDaysInput').value, 10) || 26;
+    state.salaryDays = 26;
     localStorage.setItem('spx_manual_salary', state.manualSalary);
-    localStorage.setItem('spx_salary_days', state.salaryDays);
+    localStorage.setItem('spx_salary_days', 26);
     updateAllViews();
   }
 });
