@@ -98,7 +98,7 @@ function otsuThreshold(gray) {
 
 // ==================== PREPROCESSING ====================
 async function preprocessImage(rawDataUrl, options = {}) {
-  const { upscale = 3.0, useOtsu = true, threshold = 145 } = options;
+  const { upscale = 2.0, useOtsu = true, threshold = 145 } = options;
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
@@ -179,13 +179,18 @@ function detectActiveTabByOrangeLine(imageSource) {
 }
 
 // ==================== OCR ====================
-async function ocrRecognize(preprocessedDataUrl) {
+async function ocrRecognize(preprocessedDataUrl, psm) {
   const worker = await getTesseractWorker();
+  await worker.setParameters({
+    tessedit_pageseg_mode: psm,
+    preserve_interword_spaces: '1',
+    tessedit_do_invert: '0'
+  });
   const result = await worker.recognize(preprocessedDataUrl);
   return result.data.text || '';
 }
 
-// ==================== RANGE DEFINITIONS ====================
+// ==================== RANGE ====================
 const RANGE_DEFS = [
   { key: '0_2',     min: 0,  max: 2 },
   { key: '2_4',     min: 2,  max: 4 },
@@ -205,13 +210,12 @@ function getRangeKey(minV, maxV) {
   return null;
 }
 
-// ==================== PARSE — ORDERED MATCHING ====================
+// ==================== PARSE ====================
 function parseOcrText(cleanText) {
   const weights = { '0_2':0,'2_4':0,'4_6':0,'6_8':0,'8_10':0,'10_12':0,'12_15':0,'over_15':0 };
   const confidences = {};
   const text = cleanText.replace(/[–—]/g, '-').replace(/,/g, '.');
 
-  // 1. Tổng đơn kỳ vọng
   const totalRegex = /T[oổ]ng\s*[:\-]?\s*(\d{1,6})/i;
   const totalMatch = text.match(totalRegex);
   let expectedTotal = totalMatch ? parseInt(totalMatch[1], 10) : null;
@@ -219,7 +223,7 @@ function parseOcrText(cleanText) {
   const totalPos = totalMatch ? totalMatch.index : -1;
   const totalEnd = totalMatch ? totalMatch.index + totalMatch[0].length : -1;
 
-  // 2. Tìm RANGES
+  // Ranges
   const rangeRegex = /(\d{1,2})(?:\.\d{1,3})?\s*-\s*(\d{1,2})(?:\.\d{1,3})?/g;
   const ranges = [];
   let m;
@@ -228,42 +232,33 @@ function parseOcrText(cleanText) {
     const maxV = parseInt(m[2], 10);
     const key = getRangeKey(minV, maxV);
     if (key) {
-      ranges.push({
-        key,
-        pos: m.index,
-        endPos: m.index + m[0].length
-      });
+      ranges.push({ key, pos: m.index, endPos: m.index + m[0].length });
     }
   }
   ranges.sort((a, b) => a.pos - b.pos);
 
-  // 3. Tìm tất cả NUMBERS (bất kỳ 1-6 chữ số)
+  // Numbers
   const numRegex = /\d{1,6}/g;
   const nums = [];
   while ((m = numRegex.exec(text)) !== null) {
     const val = parseInt(m[0], 10);
     const pos = m.index;
     const endPos = pos + m[0].length;
-    // Loại số nằm trong range
     if (ranges.some(r => pos < r.endPos && endPos > r.pos)) continue;
-    // Loại số của Tổng
     if (totalPos >= 0 && pos >= totalPos && pos <= totalEnd + 3) continue;
-    // Loại số 0
     if (val === 0) continue;
-    // Loại số > 99999
     if (val > 99999) continue;
     nums.push({ value: val, pos, endPos });
   }
   nums.sort((a, b) => a.pos - b.pos);
 
-  // 4. ORDERED MATCHING — match ranges[i] với nums[i]
-  // Đây là cách chính xác nhất cho format SPX: [count] [range] [count] [range] ...
+  // Ordered match
   const orderedResult = {};
   for (let i = 0; i < ranges.length && i < nums.length; i++) {
     orderedResult[ranges[i].key] = nums[i].value;
   }
 
-  // 5. DISTANCE MATCHING — fallback nếu ordered không khớp tổng
+  // Distance match
   function distanceMatch(mode) {
     const result = {};
     const used = new Set();
@@ -286,29 +281,20 @@ function parseOcrText(cleanText) {
           best = { idx, value: n.value };
         }
       });
-      if (best) {
-        result[r.key] = best.value;
-        used.add(best.idx);
-      }
+      if (best) { result[r.key] = best.value; used.add(best.idx); }
     });
     return result;
   }
 
-  function sumOf(res) {
-    return Object.values(res).reduce((a, b) => a + b, 0);
-  }
-  function countOf(res) {
-    return Object.keys(res).length;
-  }
+  const sumOf = r => Object.values(r).reduce((a, b) => a + b, 0);
+  const countOf = r => Object.keys(r).length;
 
-  // 6. Chọn kết quả tốt nhất
   let bestResult = orderedResult;
   let bestMode = 'ordered';
 
   if (expectedTotal !== null) {
     const diffOrdered = Math.abs(sumOf(orderedResult) - expectedTotal);
     if (diffOrdered > 0) {
-      // Ordered sai → thử các mode khác
       const mBefore = distanceMatch('before');
       const mAfter  = distanceMatch('after');
       const mClosest = distanceMatch('closest');
@@ -366,7 +352,7 @@ function cacheSet(hash, value) {
   }
 }
 
-// ==================== BATCH STATE ====================
+// ==================== BATCH ====================
 let batchResults = [];
 let pendingAppend = false;
 
@@ -442,41 +428,57 @@ async function processFiles(files) {
       statusDesc.innerText = 'Xác định tab...';
       const detectedType = await detectActiveTabByOrangeLine(rawDataUrl);
 
-      // Pass 1: Otsu + upscale 3.0 (chữ to hơn)
-      statusDesc.innerText = 'Quét lần 1 (chất lượng cao)...';
-      const pre1 = await preprocessImage(rawDataUrl, { upscale: 3.0, useOtsu: true });
-      const text1 = await ocrRecognize(pre1.dataUrl);
+      // PASS 1: raw + upscale 2x + Otsu + SINGLE_BLOCK
+      statusDesc.innerText = 'Quét lần 1...';
+      const pre1 = await preprocessImage(rawDataUrl, { upscale: 2.0, useOtsu: true });
+      const text1 = await ocrRecognize(pre1.dataUrl, Tesseract.PSM.SINGLE_BLOCK);
       const parsed1 = parseOcrText(text1);
 
       let bestResult = parsed1;
       let bestText = text1;
       let bestDiff = parsed1.expectedTotal !== null ? Math.abs(parsed1.totalFound - parsed1.expectedTotal) : 9999;
+      let bestPsm = 'SINGLE_BLOCK';
 
-      // Pass 2: threshold 130
+      // PASS 2: PSM.SPARSE_TEXT (chỉ khi pass 1 lệch)
       if (bestDiff > 0) {
-        statusDesc.innerText = 'Quét lần 2...';
-        const pre2 = await preprocessImage(rawDataUrl, { upscale: 3.0, useOtsu: false, threshold: 130 });
-        const text2 = await ocrRecognize(pre2.dataUrl);
+        statusDesc.innerText = 'Quét lần 2 (layout)...';
+        const text2 = await ocrRecognize(pre1.dataUrl, Tesseract.PSM.SPARSE_TEXT);
         const parsed2 = parseOcrText(text2);
         const diff2 = parsed2.expectedTotal !== null ? Math.abs(parsed2.totalFound - parsed2.expectedTotal) : 9999;
         if (diff2 < bestDiff) {
           bestResult = parsed2;
           bestText = text2;
           bestDiff = diff2;
+          bestPsm = 'SPARSE_TEXT';
         }
       }
 
-      // Pass 3: threshold 160
+      // PASS 3: threshold 130 (chỉ khi vẫn lệch)
       if (bestDiff > 0) {
         statusDesc.innerText = 'Quét lần 3...';
-        const pre3 = await preprocessImage(rawDataUrl, { upscale: 2.5, useOtsu: false, threshold: 160 });
-        const text3 = await ocrRecognize(pre3.dataUrl);
+        const pre3 = await preprocessImage(rawDataUrl, { upscale: 2.0, useOtsu: false, threshold: 130 });
+        const text3 = await ocrRecognize(pre3.dataUrl, Tesseract.PSM.SINGLE_BLOCK);
         const parsed3 = parseOcrText(text3);
         const diff3 = parsed3.expectedTotal !== null ? Math.abs(parsed3.totalFound - parsed3.expectedTotal) : 9999;
         if (diff3 < bestDiff) {
           bestResult = parsed3;
           bestText = text3;
           bestDiff = diff3;
+          bestPsm = 'SINGLE_BLOCK+TH130';
+        }
+      }
+
+      // PASS 4: raw no binarize, PSM.AUTO
+      if (bestDiff > 0) {
+        statusDesc.innerText = 'Quét lần 4 (raw)...';
+        const text4 = await ocrRecognize(pre1.dataUrl.replace(/data:image\/png/, 'data:image/png'), Tesseract.PSM.AUTO);
+        const parsed4 = parseOcrText(text4);
+        const diff4 = parsed4.expectedTotal !== null ? Math.abs(parsed4.totalFound - parsed4.expectedTotal) : 9999;
+        if (diff4 < bestDiff) {
+          bestResult = parsed4;
+          bestText = text4;
+          bestDiff = diff4;
+          bestPsm = 'AUTO';
         }
       }
 
@@ -487,11 +489,14 @@ async function processFiles(files) {
         confidences: bestResult.confidences,
         expectedTotal: bestResult.expectedTotal,
         totalFound: bestResult.totalFound,
-        fullDataUrl: rawDataUrl
+        fullDataUrl: rawDataUrl,
+        debugText: bestText,
+        debugPsm: bestPsm,
+        debugMode: bestResult.mode
       };
 
       out.push({ file: file.name, thumbnail, result, error: null });
-      cacheSet(hash, { thumbnail, result: { ...result, fullDataUrl: '' } });
+      cacheSet(hash, { thumbnail, result: { ...result, fullDataUrl: '', debugText: '' } });
     } catch (err) {
       console.error('[OCR]', file.name, err);
       out.push({ file: file.name, thumbnail: '', result: null, error: err.message });
@@ -509,7 +514,7 @@ function extractDate(text) {
   return getTodayIso();
 }
 
-// ==================== FILL MODAL ====================
+// ==================== FILL MODAL + DEBUG ====================
 export function fillModalFromResult(batchItem) {
   const r = batchItem.result;
   state.lastOcrImageDataUrl = r.fullDataUrl || '';
@@ -551,9 +556,16 @@ export function fillModalFromResult(batchItem) {
   else if (midCount > 0)  confMsg = '\n\n🟡 ' + midCount + ' dải nên xem lại (viền vàng)';
   else if (highCount > 0) confMsg = '\n\n🟢 ' + highCount + ' dải đọc chắc chắn';
 
+  // DEBUG — hiển thị raw text OCR khi lệch
+  let debugMsg = '';
+  if (warnMsg && r.debugText) {
+    const clean = r.debugText.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 300);
+    debugMsg = '\n\n🔍 [DEBUG] PSM=' + (r.debugPsm || '?') + ' · Mode=' + (r.debugMode || '?') + '\n📄 Text thô:\n' + clean;
+  }
+
   alert('✅ Quét xong!\n- Tab: ' + typeText
       + '\n- Ngày: ' + formatDateDisplay(r.parsedDate)
-      + '\n- Tổng: ' + r.totalFound + ' đơn' + warnMsg + confMsg
+      + '\n- Tổng: ' + r.totalFound + ' đơn' + warnMsg + confMsg + debugMsg
       + '\n\n📷 Kéo xuống xem ẢNH GỐC để đối chiếu.');
 }
 
@@ -792,7 +804,6 @@ function escapeHtml(s) {
   }[c]));
 }
 
-// ==================== HIGHLIGHT ====================
 export function applyConfidenceHighlight(confMap, detectedType) {
   const prefix = detectedType === 'del' ? 'del_inp'
                : detectedType === 'pick' ? 'pick_inp' : 'ret_inp';
