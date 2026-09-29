@@ -23,6 +23,7 @@ import { updateAllViews } from './render.js';
 import { testCloudConnection, pushToCloud, pullFromCloud, initCloudUI } from './cloud.js';
 import { undoLast } from './undo.js';
 import { toggleCharts } from './charts.js';
+import { WEIGHT_KEYS } from './config.js';
 
 function attachAutoClearInputs() {
   document.querySelectorAll('.auto-clear').forEach(input => {
@@ -43,7 +44,7 @@ if ('serviceWorker' in navigator) {
   });
 }
 
-// Lưu manual points ngay vào localStorage + delay render
+// === Lưu manual points: lưu ngay + delay render ===
 let manualPointsTimer = null;
 function _saveManualPoints() {
   const buuCuc = parseInt(document.getElementById('manualBuuCucInput').value, 10) || 0;
@@ -54,7 +55,7 @@ function _saveManualPoints() {
   manualPointsTimer = setTimeout(() => updateAllViews(), 300);
 }
 
-// Lưu salary ngay vào localStorage + delay render
+// === Lưu salary: lưu ngay + delay render ===
 let salaryTimer = null;
 function _saveSalaryConfig() {
   const salary = parseFloat(document.getElementById('salaryBaseInput').value) || 0;
@@ -64,6 +65,57 @@ function _saveSalaryConfig() {
   localStorage.setItem('spx_salary_days', 26);
   clearTimeout(salaryTimer);
   salaryTimer = setTimeout(() => updateAllViews(), 300);
+}
+
+// === Tìm bản ghi trùng (cùng type + cùng ngày + cùng số liệu) ===
+function _findDuplicates() {
+  const dups = [];
+  ['delivery', 'pickup', 'return'].forEach(type => {
+    const seen = {};
+    state.appData[type].forEach(r => {
+      const key = r.date + '|' + WEIGHT_KEYS.map(k => parseInt(r.weights?.[k], 10) || 0).join('_');
+      if (seen[key]) {
+        dups.push({ type, id: r.id, date: r.date, keptId: seen[key].id });
+      } else {
+        seen[key] = r;
+      }
+    });
+  });
+  return dups;
+}
+
+// === Dọn trùng: xóa hết các bản trùng, giữ lại 1 ===
+function _cleanupDuplicates() {
+  const dups = _findDuplicates();
+  if (dups.length === 0) {
+    alert('✅ Không có bản ghi trùng lặp!');
+    return;
+  }
+
+  const summary = { Giao: 0, Lấy: 0, Hoàn: 0 };
+  dups.forEach(d => {
+    const label = d.type === 'delivery' ? 'Giao' : d.type === 'pickup' ? 'Lấy' : 'Hoàn';
+    summary[label]++;
+  });
+
+  let msg = `Tìm thấy ${dups.length} bản ghi trùng lặp:\n`;
+  Object.keys(summary).forEach(k => {
+    if (summary[k] > 0) msg += `• ${k}: ${summary[k]}\n`;
+  });
+  msg += '\nXóa hết các bản ghi trùng (giữ lại 1 bản gốc)?';
+
+  if (!confirm(msg)) return;
+
+  const idsByType = { delivery: [], pickup: [], return: [] };
+  dups.forEach(d => idsByType[d.type].push(d.id));
+
+  Object.keys(idsByType).forEach(type => {
+    const ids = idsByType[type];
+    state.appData[type] = state.appData[type].filter(r => !ids.includes(r.id));
+  });
+
+  updateAllViews();
+  alert(`✅ Đã xóa ${dups.length} bản ghi trùng lặp!`);
 }
 
 Object.assign(window, {
@@ -86,7 +138,7 @@ Object.assign(window, {
   saveManualPoints: _saveManualPoints,
   saveSalaryConfig: _saveSalaryConfig,
 
-  // Nút "Lưu cấu hình" — force save ngay, không debounce
+  // Force save cấu hình
   forceSaveConfig: function() {
     const buuCuc = parseInt(document.getElementById('manualBuuCucInput').value, 10) || 0;
     const taiXe  = parseInt(document.getElementById('manualTaiXeInput').value, 10) || 0;
@@ -104,8 +156,14 @@ Object.assign(window, {
     clearTimeout(salaryTimer);
     updateAllViews();
 
-    alert('✅ Đã lưu cấu hình!\n\n• Lương: ' + salary.toLocaleString('vi-VN') + '\n• Bưu cục: ' + buuCuc.toLocaleString('vi-VN') + '\n• Tài xế: ' + taiXe.toLocaleString('vi-VN'));
-  }
+    alert('✅ Đã lưu cấu hình!\n\n• Lương: ' + salary.toLocaleString('vi-VN') +
+          '\n• Bưu cục: ' + buuCuc.toLocaleString('vi-VN') +
+          '\n• Tài xế: ' + taiXe.toLocaleString('vi-VN'));
+  },
+
+  // Dọn trùng lặp
+  findDuplicates: _findDuplicates,
+  cleanupDuplicates: _cleanupDuplicates
 });
 
 (function init() {
