@@ -104,9 +104,7 @@
 
           <div style="margin-top:12px;padding-top:12px;border-top:1px dashed rgba(148,163,184,0.3)">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-              <div style="font-size:11px;font-weight:700;color:var(--text-secondary)">
-                💰 Thu nhập tháng
-              </div>
+              <div style="font-size:11px;font-weight:700;color:var(--text-secondary)">💰 Thu nhập tháng</div>
               <div style="font-size:10px;color:var(--text-muted);font-weight:600" id="incomeDayCount">0/26 ngày</div>
             </div>
 
@@ -233,6 +231,7 @@
             <button class="btn" onclick="document.getElementById('importFileInput').click()">📥 Nạp file</button>
             <input type="file" id="importFileInput" accept=".json" style="display:none;" onchange="importData(event)">
             <button class="btn" onclick="restoreFromVault()">🔄 Phục hồi</button>
+            <button class="btn" onclick="cleanupDuplicates()" style="background:var(--glass-amber);border-color:var(--glass-amber-border);color:var(--glass-amber-text);font-weight:700">🧹 Dọn trùng</button>
             <button class="btn" onclick="clearAllHistory()" style="background:var(--glass-rose);border-color:var(--glass-rose-border);color:var(--glass-rose-text);font-weight:700">🗑️ Xóa hết</button>
           </div>
           <div class="history-filter-bar">
@@ -251,7 +250,7 @@
 <div class="modal-shade" id="entryModal">
   <div class="modal-box">
     <div class="modal-box-head">
-      <button class="modal-close-btn" id="backToBatchBtn" onclick="backToBatch()" style="display:none;font-size:11px;padding:5px 10px;background:var(--glass-sky);color:var(--glass-sky-text);border-radius:8px;font-weight:700;margin-right:auto;">← Batch</button>
+      <button class="modal-close-btn" id="backToBatchBtn" onclick="backToBatch()" style="display:none;font-size:11px;padding:5px 10px;background:var(--glass-sky);color:var(--glass-sky-text);border-radius:8px;font-weight:700;margin-right:auto;">← Quay lại</button>
       <h3 id="modalTitle" style="flex:1;text-align:center;">Nhập Sản Lượng Ngày</h3>
       <button class="modal-close-btn" onclick="closeModal()">✕</button>
     </div>
@@ -367,6 +366,16 @@
       </div>
 
       <div class="cloud-status idle" id="cloudStatus" style="margin-top:10px">Chưa cấu hình</div>
+
+      <hr style="margin:14px 0;border:none;border-top:1px solid var(--glass-border-subtle)">
+
+      <div style="font-size:12.5px;font-weight:800;margin-bottom:6px">🧹 Công cụ dọn dẹp</div>
+      <p style="font-size:10.5px;color:var(--text-muted);margin-bottom:10px">
+        Tìm và xóa các bản ghi bị trùng lặp (cùng ngày + cùng số liệu).
+      </p>
+      <button class="btn" onclick="cleanupDuplicates()" style="width:100%;background:var(--glass-amber);border-color:var(--glass-amber-border);color:var(--glass-amber-text);font-weight:700;font-size:12px;padding:10px">
+        🧹 Dọn bản ghi trùng lặp
+      </button>
 
       <hr style="margin:14px 0;border:none;border-top:1px solid var(--glass-border-subtle)">
 
