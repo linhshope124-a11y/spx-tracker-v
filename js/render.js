@@ -100,24 +100,24 @@ function _updateAllViews() {
   const salaryDays    = 26;
   const workedDays    = getWorkedDaysThisMonth();
   const effectiveDays = Math.min(workedDays, salaryDays);
-  const ratio         = effectiveDays / salaryDays;
 
-  // === Điểm khoảng cách ===
-  const manualBuuCuc    = state.manualPoints?.buuCuc || 0;
-  const manualTaiXe     = state.manualPoints?.taiXe  || 0;
-  const manualBuuCucPts = Math.round(manualBuuCuc * ratio);
-  const manualTaiXePts  = Math.round(manualTaiXe  * ratio);
-  const manualTotal     = manualBuuCucPts + manualTaiXePts;
-
-  // === Lương ===
+  // === Lương tổng tháng ===
   const salaryBase   = state.manualSalary || 0;
-  const salaryPoints = Math.round(salaryBase * ratio);
+  const manualBuuCuc = state.manualPoints?.buuCuc || 0;
+  const manualTaiXe  = state.manualPoints?.taiXe  || 0;
+  const monthlyTotal = salaryBase + manualBuuCuc + manualTaiXe;
 
-  const finalTotal  = rawBase + rankBonus + manualTotal + salaryPoints;
+  // === Lương 1 ngày = tổng tháng / 26 ===
+  const perDay = monthlyTotal / salaryDays;
+
+  // === Tích lũy = số ngày × lương/ngày ===
+  const incomeAccumulated = Math.round(perDay * effectiveDays);
+
+  const finalTotal  = rawBase + rankBonus + incomeAccumulated;
   const totalOrders = total.del + total.pick + total.ret;
 
   document.getElementById('overallTotalPoints').innerText  = formatPts(finalTotal);
-  document.getElementById('rankBonusDetailText').innerText = `Gốc: ${formatPts(rawBase)} · Thưởng: +${formatPts(rankBonus)} · K/cách: +${formatPts(manualTotal)} · Lương: +${formatPts(salaryPoints)}`;
+  document.getElementById('rankBonusDetailText').innerText = `Gốc: ${formatPts(rawBase)} · Thưởng: +${formatPts(rankBonus)} · Thu nhập: +${formatPts(incomeAccumulated)}`;
   document.getElementById('overallTotalOrders').innerText  = `${_fmt(totalOrders)} đơn`;
 
   if (totalOrders > 0) {
@@ -163,23 +163,21 @@ function _updateAllViews() {
   document.getElementById('retTotalPoints').innerText  = formatPts(retPts);
   document.getElementById('retTotalOrders').innerText  = `${_fmt(total.ret)} đơn`;
 
-  // === Update UI Lương ===
-  const salaryBaseEl     = document.getElementById('salaryBaseInput');
-  const salaryProgressEl = document.getElementById('salaryProgressText');
-  const salaryPointsEl   = document.getElementById('salaryPointsDisplay');
-  if (salaryBaseEl && document.activeElement !== salaryBaseEl) salaryBaseEl.value = salaryBase;
-  if (salaryProgressEl) salaryProgressEl.innerText = `${workedDays}/${salaryDays} ngày`;
-  if (salaryPointsEl)   salaryPointsEl.innerText   = '+' + formatPts(salaryPoints);
+  // === Update UI Thu nhập ===
+  const salaryBaseEl   = document.getElementById('salaryBaseInput');
+  const buuCucInput    = document.getElementById('manualBuuCucInput');
+  const taiXeInput     = document.getElementById('manualTaiXeInput');
+  const incomeDayCount = document.getElementById('incomeDayCount');
+  const incomePerDay   = document.getElementById('incomePerDayText');
+  const incomeTotal    = document.getElementById('incomeTotalDisplay');
 
-  // === Update UI Điểm khoảng cách ===
-  const buuCucInput      = document.getElementById('manualBuuCucInput');
-  const taiXeInput       = document.getElementById('manualTaiXeInput');
-  const totalDisplay     = document.getElementById('manualTotalDisplay');
-  const manualProgressEl = document.getElementById('manualProgressText');
-  if (buuCucInput && document.activeElement !== buuCucInput) buuCucInput.value = manualBuuCuc;
-  if (taiXeInput  && document.activeElement !== taiXeInput)  taiXeInput.value  = manualTaiXe;
-  if (manualProgressEl) manualProgressEl.innerText = `${workedDays}/${salaryDays} ngày`;
-  if (totalDisplay)     totalDisplay.innerText     = '+' + formatPts(manualTotal);
+  if (salaryBaseEl && document.activeElement !== salaryBaseEl) salaryBaseEl.value = salaryBase;
+  if (buuCucInput && document.activeElement !== buuCucInput)   buuCucInput.value  = manualBuuCuc;
+  if (taiXeInput  && document.activeElement !== taiXeInput)    taiXeInput.value   = manualTaiXe;
+
+  if (incomeDayCount) incomeDayCount.innerText = `${workedDays}/${salaryDays} ngày`;
+  if (incomePerDay)   incomePerDay.innerText   = formatPts(Math.round(perDay)) + '/ngày';
+  if (incomeTotal)    incomeTotal.innerText    = '+' + formatPts(incomeAccumulated);
 
   const filteredCount =
     state.appData.delivery.filter(r => isDateInCurrentPeriod(r.date, state.periodFilter)).length +
