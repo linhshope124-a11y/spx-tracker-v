@@ -29,7 +29,6 @@ async function getTesseractWorker() {
     });
     await worker.setParameters({
       tessedit_pageseg_mode: Tesseract.PSM.SINGLE_BLOCK,
-      tessedit_char_whitelist: '0123456789.- ',
       preserve_interword_spaces: '1',
       tessedit_do_invert: '0'
     });
@@ -99,13 +98,13 @@ function otsuThreshold(gray) {
 
 // ==================== PREPROCESSING ====================
 async function preprocessImage(rawDataUrl, options = {}) {
-  const { upscale = 2.0, useOtsu = true, threshold = 145 } = options;
+  const { upscale = 3.0, useOtsu = true, threshold = 145 } = options;
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
       try {
-        const scale = Math.min(3, upscale);
+        const scale = Math.min(4, upscale);
         const canvas = document.createElement('canvas');
         canvas.width  = Math.floor(img.width  * scale);
         canvas.height = Math.floor(img.height * scale);
@@ -186,129 +185,155 @@ async function ocrRecognize(preprocessedDataUrl) {
   return result.data.text || '';
 }
 
-// ==================== PARSE V2 — TEXT POSITION MATCHING ====================
+// ==================== RANGE DEFINITIONS ====================
+const RANGE_DEFS = [
+  { key: '0_2',     min: 0,  max: 2 },
+  { key: '2_4',     min: 2,  max: 4 },
+  { key: '4_6',     min: 4,  max: 6 },
+  { key: '6_8',     min: 6,  max: 8 },
+  { key: '8_10',    min: 8,  max: 10 },
+  { key: '10_12',   min: 10, max: 12 },
+  { key: '12_15',   min: 12, max: 15 },
+  { key: 'over_15', min: 15, max: 999 }
+];
+
+function getRangeKey(minV, maxV) {
+  for (const d of RANGE_DEFS) {
+    if (d.min === minV && d.max === maxV) return d.key;
+  }
+  if (minV === 15 && maxV > 15) return 'over_15';
+  return null;
+}
+
+// ==================== PARSE — ORDERED MATCHING ====================
 function parseOcrText(cleanText) {
   const weights = { '0_2':0,'2_4':0,'4_6':0,'6_8':0,'8_10':0,'10_12':0,'12_15':0,'over_15':0 };
   const confidences = {};
-
   const text = cleanText.replace(/[–—]/g, '-').replace(/,/g, '.');
 
   // 1. Tổng đơn kỳ vọng
-  const totalRegex = /T[oổ]ng\s*[:\-]?\s*(\d{1,6})\s*[đd][ơơ]n/i;
+  const totalRegex = /T[oổ]ng\s*[:\-]?\s*(\d{1,6})/i;
   const totalMatch = text.match(totalRegex);
   let expectedTotal = totalMatch ? parseInt(totalMatch[1], 10) : null;
   if (!Number.isFinite(expectedTotal)) expectedTotal = null;
   const totalPos = totalMatch ? totalMatch.index : -1;
+  const totalEnd = totalMatch ? totalMatch.index + totalMatch[0].length : -1;
 
-  // 2. Tìm tất cả RANGE với vị trí
+  // 2. Tìm RANGES
   const rangeRegex = /(\d{1,2})(?:\.\d{1,3})?\s*-\s*(\d{1,2})(?:\.\d{1,3})?/g;
-  const rangeMatches = [];
+  const ranges = [];
   let m;
   while ((m = rangeRegex.exec(text)) !== null) {
     const minV = parseInt(m[1], 10);
     const maxV = parseInt(m[2], 10);
-    const rangeDefs = [
-      { key: '0_2', min: 0, max: 2 },
-      { key: '2_4', min: 2, max: 4 },
-      { key: '4_6', min: 4, max: 6 },
-      { key: '6_8', min: 6, max: 8 },
-      { key: '8_10', min: 8, max: 10 },
-      { key: '10_12', min: 10, max: 12 },
-      { key: '12_15', min: 12, max: 15 }
-    ];
-    const def = rangeDefs.find(d => d.min === minV && d.max === maxV);
-    if (def) {
-      rangeMatches.push({ key: def.key, pos: m.index, full: m[0] });
-    } else if (minV === 15 && maxV > 15) {
-      rangeMatches.push({ key: 'over_15', pos: m.index, full: m[0] });
+    const key = getRangeKey(minV, maxV);
+    if (key) {
+      ranges.push({
+        key,
+        pos: m.index,
+        endPos: m.index + m[0].length
+      });
     }
   }
+  ranges.sort((a, b) => a.pos - b.pos);
 
-  // 3. Tìm tất cả COUNT với vị trí
-  const countRegex = /(\d{1,6})\s*(?:[Đđ]ơn|[đd]on)\s*(?:hàng|hang)?/g;
-  const countMatches = [];
-  while ((m = countRegex.exec(text)) !== null) {
-    const value = parseInt(m[1], 10);
-    if (totalPos >= 0 && Math.abs(m.index - totalPos) < 20) continue;
-    if (value < 0 || value > 99999) continue;
-    countMatches.push({ value, pos: m.index, raw: m[0] });
+  // 3. Tìm tất cả NUMBERS (bất kỳ 1-6 chữ số)
+  const numRegex = /\d{1,6}/g;
+  const nums = [];
+  while ((m = numRegex.exec(text)) !== null) {
+    const val = parseInt(m[0], 10);
+    const pos = m.index;
+    const endPos = pos + m[0].length;
+    // Loại số nằm trong range
+    if (ranges.some(r => pos < r.endPos && endPos > r.pos)) continue;
+    // Loại số của Tổng
+    if (totalPos >= 0 && pos >= totalPos && pos <= totalEnd + 3) continue;
+    // Loại số 0
+    if (val === 0) continue;
+    // Loại số > 99999
+    if (val > 99999) continue;
+    nums.push({ value: val, pos, endPos });
+  }
+  nums.sort((a, b) => a.pos - b.pos);
+
+  // 4. ORDERED MATCHING — match ranges[i] với nums[i]
+  // Đây là cách chính xác nhất cho format SPX: [count] [range] [count] [range] ...
+  const orderedResult = {};
+  for (let i = 0; i < ranges.length && i < nums.length; i++) {
+    orderedResult[ranges[i].key] = nums[i].value;
   }
 
-  // 4. Match — 3 MODE: before (SPX chuẩn), after, closest
-  function matchMode(mode) {
+  // 5. DISTANCE MATCHING — fallback nếu ordered không khớp tổng
+  function distanceMatch(mode) {
     const result = {};
-    const usedCounts = new Set();
-    rangeMatches.forEach(r => {
+    const used = new Set();
+    ranges.forEach(r => {
       let best = null, bestDist = 9999;
-      countMatches.forEach(c => {
-        if (usedCounts.has(c.pos)) return;
+      nums.forEach((n, idx) => {
+        if (used.has(idx)) return;
         let dist;
         if (mode === 'before') {
-          if (c.pos >= r.pos) return;
-          dist = r.pos - c.pos;
+          if (n.endPos > r.pos) return;
+          dist = r.pos - n.endPos;
         } else if (mode === 'after') {
-          if (c.pos <= r.pos) return;
-          dist = c.pos - r.pos;
+          if (n.pos < r.endPos) return;
+          dist = n.pos - r.endPos;
         } else {
-          dist = Math.abs(c.pos - r.pos);
+          dist = Math.abs(n.pos - r.pos);
         }
-        if (dist < bestDist && dist < 500) {
+        if (dist < bestDist && dist < 400) {
           bestDist = dist;
-          best = c;
+          best = { idx, value: n.value };
         }
       });
       if (best) {
-        result[r.key] = { value: best.value, pos: best.pos };
-        usedCounts.add(best.pos);
+        result[r.key] = best.value;
+        used.add(best.idx);
       }
     });
     return result;
   }
 
-  const mBefore = matchMode('before');
-  const mAfter  = matchMode('after');
-  const mClosest = matchMode('closest');
-
   function sumOf(res) {
-    return Object.values(res).reduce((a, b) => a + b.value, 0);
+    return Object.values(res).reduce((a, b) => a + b, 0);
   }
   function countOf(res) {
     return Object.keys(res).length;
   }
 
-  // Chọn mode tốt nhất:
-  // - Nếu có expectedTotal: chọn mode gần đúng nhất VÀ match nhiều dải nhất
-  // - Không có expectedTotal: chọn mode match nhiều dải nhất
-  let bestMode;
+  // 6. Chọn kết quả tốt nhất
+  let bestResult = orderedResult;
+  let bestMode = 'ordered';
+
   if (expectedTotal !== null) {
-    const candidates = [
-      { name: 'before', res: mBefore, diff: Math.abs(sumOf(mBefore) - expectedTotal), cnt: countOf(mBefore) },
-      { name: 'after', res: mAfter, diff: Math.abs(sumOf(mAfter) - expectedTotal), cnt: countOf(mAfter) },
-      { name: 'closest', res: mClosest, diff: Math.abs(sumOf(mClosest) - expectedTotal), cnt: countOf(mClosest) }
-    ];
-    // Ưu tiên match đủ 5+ dải trước, sau đó mới so diff
-    candidates.sort((a, b) => {
-      if (a.cnt !== b.cnt) return b.cnt - a.cnt;
-      return a.diff - b.diff;
-    });
-    bestMode = candidates[0];
-  } else {
-    const candidates = [
-      { name: 'before', res: mBefore, cnt: countOf(mBefore) },
-      { name: 'after', res: mAfter, cnt: countOf(mAfter) },
-      { name: 'closest', res: mClosest, cnt: countOf(mClosest) }
-    ];
-    candidates.sort((a, b) => b.cnt - a.cnt);
-    bestMode = candidates[0];
+    const diffOrdered = Math.abs(sumOf(orderedResult) - expectedTotal);
+    if (diffOrdered > 0) {
+      // Ordered sai → thử các mode khác
+      const mBefore = distanceMatch('before');
+      const mAfter  = distanceMatch('after');
+      const mClosest = distanceMatch('closest');
+      const candidates = [
+        { name: 'ordered', res: orderedResult, diff: diffOrdered, cnt: countOf(orderedResult) },
+        { name: 'before',  res: mBefore,       diff: Math.abs(sumOf(mBefore) - expectedTotal),  cnt: countOf(mBefore) },
+        { name: 'after',   res: mAfter,        diff: Math.abs(sumOf(mAfter) - expectedTotal),   cnt: countOf(mAfter) },
+        { name: 'closest', res: mClosest,      diff: Math.abs(sumOf(mClosest) - expectedTotal), cnt: countOf(mClosest) }
+      ];
+      candidates.sort((a, b) => {
+        if (a.diff !== b.diff) return a.diff - b.diff;
+        return b.cnt - a.cnt;
+      });
+      bestResult = candidates[0].res;
+      bestMode = candidates[0].name;
+    }
   }
 
-  Object.keys(bestMode.res).forEach(k => {
-    weights[k] = bestMode.res[k].value;
+  Object.keys(bestResult).forEach(k => {
+    weights[k] = bestResult[k];
     confidences[k] = 88;
   });
 
   const totalFound = Object.values(weights).reduce((a, b) => a + b, 0);
-  return { weights, confidences, expectedTotal, totalFound, mode: bestMode.name };
+  return { weights, confidences, expectedTotal, totalFound, mode: bestMode };
 }
 
 // ==================== CACHE ====================
@@ -417,9 +442,9 @@ async function processFiles(files) {
       statusDesc.innerText = 'Xác định tab...';
       const detectedType = await detectActiveTabByOrangeLine(rawDataUrl);
 
-      // Pass 1: Otsu + upscale 2.0
-      statusDesc.innerText = 'Quét lần 1...';
-      const pre1 = await preprocessImage(rawDataUrl, { upscale: 2.0, useOtsu: true });
+      // Pass 1: Otsu + upscale 3.0 (chữ to hơn)
+      statusDesc.innerText = 'Quét lần 1 (chất lượng cao)...';
+      const pre1 = await preprocessImage(rawDataUrl, { upscale: 3.0, useOtsu: true });
       const text1 = await ocrRecognize(pre1.dataUrl);
       const parsed1 = parseOcrText(text1);
 
@@ -427,10 +452,10 @@ async function processFiles(files) {
       let bestText = text1;
       let bestDiff = parsed1.expectedTotal !== null ? Math.abs(parsed1.totalFound - parsed1.expectedTotal) : 9999;
 
-      // Pass 2: ngưỡng cố định 130
+      // Pass 2: threshold 130
       if (bestDiff > 0) {
-        statusDesc.innerText = 'Quét lại lần 2...';
-        const pre2 = await preprocessImage(rawDataUrl, { upscale: 2.0, useOtsu: false, threshold: 130 });
+        statusDesc.innerText = 'Quét lần 2...';
+        const pre2 = await preprocessImage(rawDataUrl, { upscale: 3.0, useOtsu: false, threshold: 130 });
         const text2 = await ocrRecognize(pre2.dataUrl);
         const parsed2 = parseOcrText(text2);
         const diff2 = parsed2.expectedTotal !== null ? Math.abs(parsed2.totalFound - parsed2.expectedTotal) : 9999;
@@ -441,9 +466,9 @@ async function processFiles(files) {
         }
       }
 
-      // Pass 3: upscale 2.5, threshold 160
+      // Pass 3: threshold 160
       if (bestDiff > 0) {
-        statusDesc.innerText = 'Quét lại lần 3...';
+        statusDesc.innerText = 'Quét lần 3...';
         const pre3 = await preprocessImage(rawDataUrl, { upscale: 2.5, useOtsu: false, threshold: 160 });
         const text3 = await ocrRecognize(pre3.dataUrl);
         const parsed3 = parseOcrText(text3);
@@ -767,6 +792,7 @@ function escapeHtml(s) {
   }[c]));
 }
 
+// ==================== HIGHLIGHT ====================
 export function applyConfidenceHighlight(confMap, detectedType) {
   const prefix = detectedType === 'del' ? 'del_inp'
                : detectedType === 'pick' ? 'pick_inp' : 'ret_inp';
