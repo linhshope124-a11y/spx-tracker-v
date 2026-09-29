@@ -113,7 +113,7 @@
             <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px dashed rgba(148,163,184,0.2)">
               <span style="font-size:12px;font-weight:600;color:var(--text-primary)">💵 Lương cơ bản</span>
               <div style="display:flex;align-items:center;gap:6px">
-                <input type="number" inputmode="numeric" id="salaryBaseInput" value="0" min="0" onchange="saveSalaryConfig()"
+                <input type="number" inputmode="numeric" id="salaryBaseInput" value="0" min="0" oninput="saveSalaryConfig()" onchange="saveSalaryConfig()"
                        style="width:90px;padding:6px 10px;border:1px solid var(--glass-border-subtle);border-radius:8px;background:var(--glass-surface);color:var(--spx-orange);font-size:14px;font-weight:800;text-align:right;outline:none;font-family:inherit;">
                 <span style="font-size:10px;color:var(--text-muted);white-space:nowrap">điểm/tháng</span>
               </div>
@@ -122,7 +122,7 @@
             <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px dashed rgba(148,163,184,0.2)">
               <span style="font-size:12px;font-weight:600;color:var(--text-primary)">🏢 Bưu cục</span>
               <div style="display:flex;align-items:center;gap:6px">
-                <input type="number" inputmode="numeric" id="manualBuuCucInput" value="0" min="0" onchange="saveManualPoints()"
+                <input type="number" inputmode="numeric" id="manualBuuCucInput" value="0" min="0" oninput="saveManualPoints()" onchange="saveManualPoints()"
                        style="width:90px;padding:6px 10px;border:1px solid var(--glass-border-subtle);border-radius:8px;background:var(--glass-surface);color:var(--spx-orange);font-size:14px;font-weight:800;text-align:right;outline:none;font-family:inherit;">
                 <span style="font-size:10px;color:var(--text-muted);white-space:nowrap">điểm/tháng</span>
               </div>
@@ -131,7 +131,7 @@
             <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px dashed rgba(148,163,184,0.2)">
               <span style="font-size:12px;font-weight:600;color:var(--text-primary)">🚗 Tài xế</span>
               <div style="display:flex;align-items:center;gap:6px">
-                <input type="number" inputmode="numeric" id="manualTaiXeInput" value="0" min="0" onchange="saveManualPoints()"
+                <input type="number" inputmode="numeric" id="manualTaiXeInput" value="0" min="0" oninput="saveManualPoints()" onchange="saveManualPoints()"
                        style="width:90px;padding:6px 10px;border:1px solid var(--glass-border-subtle);border-radius:8px;background:var(--glass-surface);color:var(--spx-orange);font-size:14px;font-weight:800;text-align:right;outline:none;font-family:inherit;">
                 <span style="font-size:10px;color:var(--text-muted);white-space:nowrap">điểm/tháng</span>
               </div>
@@ -147,6 +147,10 @@
                 <b id="incomeTotalDisplay" style="color:var(--spx-orange);font-size:15px;font-weight:800">+0 Điểm</b>
               </div>
             </div>
+
+            <button class="btn" onclick="forceSaveConfig()" style="width:100%;margin-top:10px;background:var(--spx-orange);border-color:var(--spx-orange);color:#fff;font-weight:700;font-size:12px;padding:10px">
+              💾 Lưu cấu hình
+            </button>
           </div>
         </section>
 
@@ -229,7 +233,7 @@
             <button class="btn" onclick="document.getElementById('importFileInput').click()">📥 Nạp file</button>
             <input type="file" id="importFileInput" accept=".json" style="display:none;" onchange="importData(event)">
             <button class="btn" onclick="restoreFromVault()">🔄 Phục hồi</button>
-            <button class="btn" style="color:var(--glass-rose-text)" onclick="clearAllHistory()">Xóa hết</button>
+            <button class="btn" onclick="clearAllHistory()" style="background:var(--glass-rose);border-color:var(--glass-rose-border);color:var(--glass-rose-text);font-weight:700">🗑️ Xóa hết</button>
           </div>
           <div class="history-filter-bar">
             <button class="filter-btn active" onclick="setHistFilter('all', this)">Tất cả</button>
@@ -363,6 +367,16 @@
       </div>
 
       <div class="cloud-status idle" id="cloudStatus" style="margin-top:10px">Chưa cấu hình</div>
+
+      <hr style="margin:14px 0;border:none;border-top:1px solid var(--glass-border-subtle)">
+
+      <div style="font-size:12.5px;font-weight:800;margin-bottom:6px;color:var(--glass-rose-text)">⚠️ Vùng nguy hiểm</div>
+      <p style="font-size:10.5px;color:var(--text-muted);margin-bottom:10px">
+        Xóa toàn bộ dữ liệu sản lượng đã nhập. <b>Không thể khôi phục!</b>
+      </p>
+      <button class="btn" onclick="clearAllHistory()" style="width:100%;background:var(--glass-rose);border-color:var(--glass-rose-border);color:var(--glass-rose-text);font-weight:700;font-size:12px;padding:10px">
+        🗑️ Xóa toàn bộ Nhật ký
+      </button>
 
       <hr style="margin:14px 0;border:none;border-top:1px solid var(--glass-border-subtle)">
 
