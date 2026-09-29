@@ -22,7 +22,6 @@ import {
 import { updateAllViews } from './render.js';
 import { testCloudConnection, pushToCloud, pullFromCloud, initCloudUI } from './cloud.js';
 import { undoLast } from './undo.js';
-import { toggleCharts } from './charts.js';
 import { WEIGHT_KEYS } from './config.js';
 
 function attachAutoClearInputs() {
@@ -44,7 +43,6 @@ if ('serviceWorker' in navigator) {
   });
 }
 
-// === Lưu manual points: lưu ngay + delay render ===
 let manualPointsTimer = null;
 function _saveManualPoints() {
   const buuCuc = parseInt(document.getElementById('manualBuuCucInput').value, 10) || 0;
@@ -55,7 +53,6 @@ function _saveManualPoints() {
   manualPointsTimer = setTimeout(() => updateAllViews(), 300);
 }
 
-// === Lưu salary: lưu ngay + delay render ===
 let salaryTimer = null;
 function _saveSalaryConfig() {
   const salary = parseFloat(document.getElementById('salaryBaseInput').value) || 0;
@@ -67,7 +64,6 @@ function _saveSalaryConfig() {
   salaryTimer = setTimeout(() => updateAllViews(), 300);
 }
 
-// === Tìm bản ghi trùng ===
 function _findDuplicates() {
   const dups = [];
   ['delivery', 'pickup', 'return'].forEach(type => {
@@ -84,11 +80,10 @@ function _findDuplicates() {
   return dups;
 }
 
-// === Dọn trùng ===
 function _cleanupDuplicates() {
   const dups = _findDuplicates();
   if (dups.length === 0) {
-    alert('✅ Không có bản ghi trùng lặp!');
+    alert('Không có bản ghi trùng lặp!');
     return;
   }
   const summary = { Giao: 0, Lấy: 0, Hoàn: 0 };
@@ -109,10 +104,9 @@ function _cleanupDuplicates() {
     state.appData[type] = state.appData[type].filter(r => !ids.includes(r.id));
   });
   updateAllViews();
-  alert(`✅ Đã xóa ${dups.length} bản ghi trùng lặp!`);
+  alert(`Đã xóa ${dups.length} bản ghi trùng lặp!`);
 }
 
-// === Toggle ẩn/hiện khối Thu nhập ===
 function _toggleIncomeSection() {
   const content = document.getElementById('incomeContent');
   const icon = document.getElementById('incomeToggleIcon');
@@ -158,7 +152,7 @@ Object.assign(window, {
   copyDataJson, openPasteJsonModal, closePasteJsonModal,
   confirmImportJsonString, exportData, importData, restoreFromVault,
   testCloudConnection, pushToCloud, pullFromCloud, initCloudUI,
-  undoLast, toggleCharts,
+  undoLast,
 
   saveManualPoints: _saveManualPoints,
   saveSalaryConfig: _saveSalaryConfig,
@@ -176,15 +170,13 @@ Object.assign(window, {
     clearTimeout(manualPointsTimer);
     clearTimeout(salaryTimer);
     updateAllViews();
-    alert('✅ Đã lưu cấu hình!\n\n• Lương: ' + salary.toLocaleString('vi-VN') +
+    alert('Đã lưu cấu hình!\n\n• Lương: ' + salary.toLocaleString('vi-VN') +
           '\n• Bưu cục: ' + buuCuc.toLocaleString('vi-VN') +
           '\n• Tài xế: ' + taiXe.toLocaleString('vi-VN'));
   },
 
   findDuplicates: _findDuplicates,
   cleanupDuplicates: _cleanupDuplicates,
-
-  // Toggle Thu nhập
   toggleIncomeSection: _toggleIncomeSection,
   initIncomeSection: _initIncomeSection
 });
