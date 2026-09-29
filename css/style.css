@@ -180,12 +180,14 @@ tr:last-child td{border-bottom:none}
 #ocrLightbox.active{display:flex}
 #ocrLightbox img{max-width:100%;max-height:100%;object-fit:contain;touch-action:pinch-zoom;cursor:zoom-out}
 #ocrLightbox .close-lb{position:absolute;top:calc(12px + env(safe-area-inset-top,0));right:12px;width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,.2);color:#fff;border:none;font-size:22px;font-weight:700;cursor:pointer}
+
+/* Batch OCR */
 #batchList{display:flex;flex-direction:column;gap:8px}
 .batch-item{display:flex;gap:10px;padding:10px;border-radius:var(--radius-md);border:1px solid var(--glass-border-subtle);background:var(--glass-subtle);align-items:center}
 .batch-item.error{border-color:var(--glass-rose-border);background:var(--glass-rose)}
 .batch-thumb{width:56px;height:56px;border-radius:var(--radius-sm);object-fit:cover;flex-shrink:0;border:1px solid var(--glass-border);background:var(--glass-surface)}
 .batch-info{flex:1;min-width:0}
-.batch-title{font-size:12px;font-weight:700;display:flex;align-items:center;gap:5px;margin-bottom:2px}
+.batch-title{font-size:12px;font-weight:700;display:flex;align-items:center;gap:5px;margin-bottom:2px;flex-wrap:wrap}
 .batch-meta{font-size:10px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .batch-total{font-size:12px;font-weight:800;color:var(--glass-emerald-text);margin-top:2px}
 .batch-actions{display:flex;flex-direction:column;gap:4px;flex-shrink:0}
@@ -193,16 +195,57 @@ tr:last-child td{border-bottom:none}
 .batch-btn:active{transform:scale(0.96)}
 .batch-btn-import{background:var(--glass-sky);border-color:var(--glass-sky-border);color:var(--glass-sky-text)}
 .batch-btn-remove{background:var(--glass-rose);border-color:var(--glass-rose-border);color:var(--glass-rose-text)}
+.batch-btn-compare{background:var(--glass-amber);border-color:var(--glass-amber-border);color:var(--glass-amber-text);font-weight:800}
+
+/* Cloud Status */
 .cloud-status{padding:6px 10px;border-radius:10px;font-size:10.5px;font-weight:600;text-align:center;margin-top:10px}
 .cloud-status.ok{background:var(--glass-emerald);color:var(--glass-emerald-text);border:1px solid var(--glass-emerald-border)}
 .cloud-status.err{background:var(--glass-rose);color:var(--glass-rose-text);border:1px solid var(--glass-rose-border)}
 .cloud-status.idle{background:var(--glass-subtle);color:var(--text-muted);border:1px solid var(--glass-border-subtle)}
+
+/* Undo Banner */
 .undo-banner{position:fixed;bottom:calc(95px + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%) translateY(120px);background:var(--glass-surface);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);border:1px solid var(--glass-border);box-shadow:0 8px 30px rgba(0,0,0,0.25);padding:10px 14px;border-radius:14px;display:flex;align-items:center;gap:12px;z-index:150;opacity:0;transition:all 0.3s cubic-bezier(0.4,0,0.2,1);max-width:90%;font-size:12px;font-weight:600;color:var(--text-primary);pointer-events:none}
 .undo-banner.active{transform:translateX(-50%) translateY(0);opacity:1;pointer-events:auto}
 .undo-btn{background:var(--spx-orange);color:#fff;border:none;padding:6px 12px;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;transition:transform 0.15s}
 .undo-btn:active{transform:scale(0.94)}
+
+/* Charts */
 .charts-loading{text-align:center;padding:20px;color:var(--text-muted);font-size:12px;font-weight:600}
 .chart-box{background:var(--glass-subtle);border:1px solid var(--glass-border-subtle);border-radius:var(--radius-md);padding:12px;margin-bottom:10px}
 .chart-box:last-child{margin-bottom:0}
 .chart-title{font-size:11.5px;font-weight:700;margin-bottom:10px;color:var(--text-secondary)}
 .chart-box canvas{max-height:220px;width:100% !important}
+
+/* Income Section - Collapsible */
+.income-toggle {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: transparent;
+  border: none;
+  padding: 8px 4px;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: background 0.15s;
+  font-family: inherit;
+}
+.income-toggle:active {
+  background: var(--glass-subtle);
+}
+.income-toggle-icon {
+  font-size: 10px;
+  color: var(--text-muted);
+  transition: transform 0.2s;
+  display: inline-block;
+  width: 14px;
+  text-align: center;
+}
+.income-content {
+  padding-top: 4px;
+  animation: incomeSlide 0.2s ease-out;
+}
+@keyframes incomeSlide {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
