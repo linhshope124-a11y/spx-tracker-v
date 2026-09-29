@@ -28,7 +28,7 @@ async function getTesseractWorker() {
       }
     });
     await worker.setParameters({
-      tessedit_pageseg_mode: Tesseract.PSM.SINGLE_BLOCK,
+      tessedit_pageseg_mode: Tesseract.PSM.SPARSE_TEXT,
       preserve_interword_spaces: '1',
       tessedit_do_invert: '0'
     });
@@ -73,58 +73,93 @@ function makeThumbnail(dataUrl, maxW = 96) {
   });
 }
 
-async function cropImageStrip(dataUrl, yStartPct, yEndPct, maxWidth = 1440) {
+// ==================== OTSU THRESHOLD ====================
+function otsuThreshold(gray) {
+  const hist = new Array(256).fill(0);
+  for (let i = 0; i < gray.length; i++) hist[gray[i]]++;
+  const total = gray.length;
+  let sum = 0;
+  for (let i = 0; i < 256; i++) sum += i * hist[i];
+  let sumB = 0, wB = 0, wF = 0;
+  let maxVar = 0, threshold = 128;
+  for (let t = 0; t < 256; t++) {
+    wB += hist[t];
+    if (wB === 0) continue;
+    wF = total - wB;
+    if (wF === 0) break;
+    sumB += t * hist[t];
+    const mB = sumB / wB;
+    const mF = (sum - sumB) / wF;
+    const varBetween = wB * wF * (mB - mF) * (mB - mF);
+    if (varBetween > maxVar) { maxVar = varBetween; threshold = t; }
+  }
+  return threshold;
+}
+
+// ==================== PREPROCESSING ====================
+async function preprocessImage(rawDataUrl, options = {}) {
+  const { upscale = 1.5, useOtsu = true } = options;
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
       try {
-        const srcY0 = Math.floor(img.height * yStartPct);
-        const srcY1 = Math.floor(img.height * yEndPct);
-        const srcH  = srcY1 - srcY0;
-        const scale = Math.min(1, maxWidth / img.width);
-        const outW  = Math.floor(img.width * scale);
-        const outH  = Math.floor(srcH * scale);
+        const scale = Math.min(2, upscale * (2000 / Math.max(img.width, 1)));
         const canvas = document.createElement('canvas');
-        canvas.width = outW; canvas.height = outH;
+        canvas.width  = Math.floor(img.width  * scale);
+        canvas.height = Math.floor(img.height * scale);
         const ctx = canvas.getContext('2d', { willReadFrequently: true });
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
-        ctx.drawImage(img, 0, srcY0, img.width, srcH, 0, 0, outW, outH);
-        const imgData = ctx.getImageData(0, 0, outW, outH);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const data = imgData.data;
-        for (let j = 0; j < data.length; j += 4) {
-          const avg = data[j] * 0.299 + data[j+1] * 0.587 + data[j+2] * 0.114;
-          const val = avg < 145 ? 0 : 255;
-          data[j] = data[j+1] = data[j+2] = val;
+        const w = canvas.width, h = canvas.height;
+
+        const gray = new Uint8Array(w * h);
+        for (let i = 0, j = 0; i < data.length; i += 4, j++) {
+          gray[j] = Math.round(data[i] * 0.299 + data[i+1] * 0.587 + data[i+2] * 0.114);
+        }
+
+        const sharpened = new Uint8Array(w * h);
+        const kernel = [0, -1, 0, -1, 5, -1, 0, -1, 0];
+        for (let y = 1; y < h - 1; y++) {
+          for (let x = 1; x < w - 1; x++) {
+            let sum = 0, ki = 0;
+            for (let dy = -1; dy <= 1; dy++) {
+              for (let dx = -1; dx <= 1; dx++) {
+                sum += gray[(y + dy) * w + (x + dx)] * kernel[ki++];
+              }
+            }
+            sharpened[y * w + x] = Math.max(0, Math.min(255, sum));
+          }
+        }
+        for (let x = 0; x < w; x++) {
+          sharpened[x] = gray[x];
+          sharpened[(h - 1) * w + x] = gray[(h - 1) * w + x];
+        }
+        for (let y = 0; y < h; y++) {
+          sharpened[y * w] = gray[y * w];
+          sharpened[y * w + w - 1] = gray[y * w + w - 1];
+        }
+
+        const threshold = useOtsu ? otsuThreshold(sharpened) : 145;
+        for (let i = 0, j = 0; i < data.length; i += 4, j++) {
+          const val = sharpened[j] > threshold ? 255 : 0;
+          data[i] = data[i+1] = data[i+2] = val;
+          data[i+3] = 255;
         }
         ctx.putImageData(imgData, 0, 0);
-        resolve(canvas.toDataURL('image/png'));
+        resolve({ dataUrl: canvas.toDataURL('image/png'), width: w, height: h });
       } catch (e) { reject(e); }
     };
-    img.onerror = () => reject(new Error('Crop failed'));
-    img.src = dataUrl;
+    img.onerror = () => reject(new Error('Image load failed'));
+    img.src = rawDataUrl;
   });
 }
 
-async function ocrWithFineStrips(rawDataUrl, statusCallback) {
-  const worker = await getTesseractWorker();
-  const strips = [
-    { start: 0.05, end: 0.40 }, { start: 0.20, end: 0.55 },
-    { start: 0.35, end: 0.70 }, { start: 0.50, end: 0.85 },
-    { start: 0.65, end: 1.00 }, { start: 0.80, end: 1.00 }
-  ];
-  const allResults = [];
-  for (let i = 0; i < strips.length; i++) {
-    const s = strips[i];
-    if (statusCallback) statusCallback(i + 1, strips.length);
-    const cropped = await cropImageStrip(rawDataUrl, s.start, s.end, 1440);
-    const result  = await worker.recognize(cropped);
-    allResults.push({ text: result.data.text || '', words: result.data.words || [] });
-  }
-  return allResults;
-}
-
+// ==================== PHÁT HIỆN TAB ====================
 function detectActiveTabByOrangeLine(imageSource) {
   return new Promise(resolve => {
     const img = new Image();
@@ -168,11 +203,154 @@ function detectActiveTabByOrangeLine(imageSource) {
   });
 }
 
-// ==================== BATCH STATE ====================
-let batchResults = [];
-let pendingAppend = false;
+// ==================== OCR VỚI WORDS ====================
+async function ocrWithWords(preprocessedDataUrl) {
+  const worker = await getTesseractWorker();
+  const result = await worker.recognize(preprocessedDataUrl);
+  const words = [];
+  if (result.data.words && result.data.words.length) {
+    result.data.words.forEach(word => {
+      const text = (word.text || '').trim();
+      if (!text) return;
+      const digits = text.replace(/[^\d]/g, '');
+      if (!digits) return;
+      words.push({
+        text: text,
+        digits: digits,
+        value: parseInt(digits, 10),
+        confidence: word.confidence || 0,
+        y0: word.bbox.y0,
+        y1: word.bbox.y1,
+        x0: word.bbox.x0,
+        x1: word.bbox.x1,
+        cy: (word.bbox.y0 + word.bbox.y1) / 2
+      });
+    });
+  }
+  return { words, text: result.data.text || '' };
+}
 
-// ==================== OCR CACHE ====================
+// ==================== PARSE CHÍNH — MATCH THEO VỊ TRÍ TEXT ====================
+function parseByRowLayout(words, detectedColorType, cleanText) {
+  const weights = { '0_2':0,'2_4':0,'4_6':0,'6_8':0,'8_10':0,'10_12':0,'12_15':0,'over_15':0 };
+  const confidences = {};
+
+  const text = cleanText.replace(/[–—]/g, '-');
+
+  // 1. Tìm Tổng đơn kỳ vọng
+  const totalRegex = /T[oổ]ng\s*[:\-]?\s*(\d{1,6})\s*[đd][ơơ]n/i;
+  const totalMatch = text.match(totalRegex);
+  let expectedTotal = totalMatch ? parseInt(totalMatch[1], 10) : null;
+  if (!Number.isFinite(expectedTotal)) expectedTotal = null;
+  const totalPos = totalMatch ? totalMatch.index : -1;
+
+  // 2. Tìm tất cả RANGE (X.XXX - Y.YYY hoặc X - Y)
+  const rangeRegex = /(\d{1,2})(?:\.\d{1,3})?\s*-\s*(\d{1,2})(?:\.\d{1,3})?/g;
+  const rangeMatches = [];
+  let m;
+  while ((m = rangeRegex.exec(text)) !== null) {
+    const minV = parseInt(m[1], 10);
+    const maxV = parseInt(m[2], 10);
+    const rangeDefs = [
+      { key: '0_2', min: 0, max: 2 },
+      { key: '2_4', min: 2, max: 4 },
+      { key: '4_6', min: 4, max: 6 },
+      { key: '6_8', min: 6, max: 8 },
+      { key: '8_10', min: 8, max: 10 },
+      { key: '10_12', min: 10, max: 12 },
+      { key: '12_15', min: 12, max: 15 }
+    ];
+    const def = rangeDefs.find(d => d.min === minV && d.max === maxV);
+    if (def) {
+      rangeMatches.push({ key: def.key, pos: m.index, full: m[0] });
+    } else if (minV === 15 && maxV > 15) {
+      rangeMatches.push({ key: 'over_15', pos: m.index, full: m[0] });
+    }
+  }
+
+  // 3. Tìm tất cả COUNTS (N Đơn hàng)
+  const countRegex = /(\d{1,6})\s*(?:[Đđ]ơn|[đd]on)\s*(?:hàng|hang)?/g;
+  const countMatches = [];
+  while ((m = countRegex.exec(text)) !== null) {
+    const value = parseInt(m[1], 10);
+    if (totalPos >= 0 && Math.abs(m.index - totalPos) < 15) continue;
+    if (value < 0 || value > 99999) continue;
+    countMatches.push({ value, pos: m.index, raw: m[0] });
+  }
+
+  // 4. Match range ↔ count gần nhất
+  const usedCounts = new Set();
+  rangeMatches.forEach(r => {
+    if (weights[r.key] > 0) return;
+    let best = null, bestDist = 9999;
+    countMatches.forEach(c => {
+      if (usedCounts.has(c.pos)) return;
+      const dist = Math.abs(c.pos - r.pos);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = c;
+      }
+    });
+    if (best && bestDist < 150) {
+      weights[r.key] = best.value;
+      confidences[r.key] = 88;
+      usedCounts.add(best.pos);
+    }
+  });
+
+  // 5. Fallback: match theo words[] nếu regex không đủ
+  const matchedCount = Object.values(weights).filter(v => v > 0).length;
+  if (matchedCount < 3 && words && words.length > 0) {
+    const sorted = [...words].sort((a, b) => a.cy - b.cy);
+    const lines = [];
+    let cur = [sorted[0]];
+    for (let i = 1; i < sorted.length; i++) {
+      if (Math.abs(sorted[i].cy - cur[cur.length - 1].cy) <= 25) cur.push(sorted[i]);
+      else { lines.push(cur); cur = [sorted[i]]; }
+    }
+    if (cur.length) lines.push(cur);
+
+    const rangeDefs = [
+      { key: '0_2', min: 0, max: 2 }, { key: '2_4', min: 2, max: 4 },
+      { key: '4_6', min: 4, max: 6 }, { key: '6_8', min: 6, max: 8 },
+      { key: '8_10', min: 8, max: 10 }, { key: '10_12', min: 10, max: 12 },
+      { key: '12_15', min: 12, max: 15 }, { key: 'over_15', min: 15, max: 999 }
+    ];
+
+    for (let li = 0; li < lines.length; li++) {
+      const line = lines[li];
+      for (let i = 0; i < line.length - 1; i++) {
+        const a = parseInt(line[i].digits, 10);
+        const b = parseInt(line[i + 1].digits, 10);
+        if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
+        const def = rangeDefs.find(d => d.min === a && (d.max === b || (d.key === 'over_15' && b > 15)));
+        if (!def || weights[def.key] > 0) continue;
+
+        const yRange = (line[i].cy + line[i + 1].cy) / 2;
+        let best = null, bestDist = 99999;
+        lines.forEach((otherLine, oi) => {
+          const txt = otherLine.map(w => w.text).join(' ');
+          if (!/[Đđ]ơn|[đd]on/i.test(txt)) return;
+          otherLine.forEach(w => {
+            const v = parseInt(w.digits, 10);
+            if (!Number.isFinite(v) || v < 1 || v > 99999) return;
+            const dist = Math.abs(w.cy - yRange) + Math.abs(oi - li) * 50;
+            if (dist < bestDist) { bestDist = dist; best = { value: v, conf: w.confidence }; }
+          });
+        });
+        if (best) {
+          weights[def.key] = best.value;
+          confidences[def.key] = best.conf;
+        }
+      }
+    }
+  }
+
+  const totalFound = Object.values(weights).reduce((a, b) => a + b, 0);
+  return { weights, confidences, expectedTotal, totalFound };
+}
+
+// ==================== CACHE ====================
 const ocrCache = new Map();
 const OCR_CACHE_MAX = 30;
 
@@ -204,7 +382,11 @@ function cacheSet(hash, value) {
   }
 }
 
-// ==================== MAIN ENTRY ====================
+// ==================== BATCH STATE ====================
+let batchResults = [];
+let pendingAppend = false;
+
+// ==================== MAIN ====================
 export async function handleOcrImage(event) {
   const files = Array.from(event.target.files || []);
   event.target.value = '';
@@ -272,17 +454,43 @@ async function processFiles(files) {
         continue;
       }
 
+      statusDesc.innerText = 'Xử lý ảnh...';
       const thumbnail = await makeThumbnail(rawDataUrl, 96);
+
       statusDesc.innerText = 'Xác định tab...';
       const detectedType = await detectActiveTabByOrangeLine(rawDataUrl);
 
-      statusDesc.innerText = 'Đang quét 6 lớp...';
-      const stripResults = await ocrWithFineStrips(rawDataUrl, (idx, total) => {
-        statusDesc.innerText = `Vùng ${idx}/${total}...`;
-      });
+      statusDesc.innerText = 'Tiền xử lý ảnh...';
+      const pre1 = await preprocessImage(rawDataUrl, { upscale: 1.5, useOtsu: true });
 
-      const result = parseOcrToWeights(stripResults, detectedType || 'del');
-      result.fullDataUrl = rawDataUrl;
+      statusDesc.innerText = 'Đang quét (lần 1)...';
+      const ocr1 = await ocrWithWords(pre1.dataUrl);
+      const parsed1 = parseByRowLayout(ocr1.words, detectedType || 'del', ocr1.text);
+
+      let finalResult = parsed1;
+      const needRetry = parsed1.totalFound === 0 ||
+                        (parsed1.expectedTotal !== null && Math.abs(parsed1.totalFound - parsed1.expectedTotal) > 5);
+
+      if (needRetry) {
+        statusDesc.innerText = 'Đang quét lại (lần 2)...';
+        const pre2 = await preprocessImage(rawDataUrl, { upscale: 2.0, useOtsu: false });
+        const ocr2 = await ocrWithWords(pre2.dataUrl);
+        const parsed2 = parseByRowLayout(ocr2.words, detectedType || 'del', ocr2.text);
+
+        const diff1 = parsed1.expectedTotal !== null ? Math.abs(parsed1.totalFound - parsed1.expectedTotal) : 9999;
+        const diff2 = parsed2.expectedTotal !== null ? Math.abs(parsed2.totalFound - parsed2.expectedTotal) : 9999;
+        finalResult = diff2 < diff1 ? parsed2 : parsed1;
+      }
+
+      const result = {
+        detectedColorType: detectedType || 'del',
+        parsedDate: extractDate(ocr1.text),
+        weights: finalResult.weights,
+        confidences: finalResult.confidences,
+        expectedTotal: finalResult.expectedTotal,
+        totalFound: finalResult.totalFound,
+        fullDataUrl: rawDataUrl
+      };
 
       out.push({ file: file.name, thumbnail, result, error: null });
 
@@ -295,136 +503,13 @@ async function processFiles(files) {
   return out;
 }
 
-// ==================== PARSE ====================
-export function parseOcrToWeights(stripResults, detectedColorType) {
-  const stripTexts = stripResults.map(r => typeof r === 'string' ? r : r.text);
-  const stripWords = stripResults.map(r => typeof r === 'string' ? [] : (r.words || []));
-  const cleanText  = stripTexts.join('\n').replace(/,/g, '.');
-
-  let parsedDate = getTodayIso();
+function extractDate(text) {
+  const cleanText = text.replace(/,/g, '.');
   const dateMatch = cleanText.match(/(?:ngày|ngay)?\s*[-–:]?\s*(\d{1,2})[\/\-\.](\d{1,2})/i);
   if (dateMatch) {
-    parsedDate = new Date().getFullYear() + '-' + dateMatch[2].padStart(2, '0') + '-' + dateMatch[1].padStart(2, '0');
+    return new Date().getFullYear() + '-' + dateMatch[2].padStart(2, '0') + '-' + dateMatch[1].padStart(2, '0');
   }
-
-  const totalMatch = cleanText.match(/T[oổ]ng(?:\s+c[ộo]ng)?\s*[:\-–]?\s*([\d\.,]+)\s*[đd][ơo]n/i);
-  let expectedTotal = totalMatch ? parseInt(totalMatch[1].replace(/[.,]/g, ''), 10) : null;
-  if (!Number.isFinite(expectedTotal)) expectedTotal = null;
-
-  const weights     = { '0_2':0,'2_4':0,'4_6':0,'6_8':0,'8_10':0,'10_12':0,'12_15':0,'over_15':0 };
-  const confidences = {};
-
-  const weightRanges = [
-    { key: '0_2', min: 0, max: 2 }, { key: '2_4', min: 2, max: 4 },
-    { key: '4_6', min: 4, max: 6 }, { key: '6_8', min: 6, max: 8 },
-    { key: '8_10', min: 8, max: 10 }, { key: '10_12', min: 10, max: 12 },
-    { key: '12_15', min: 12, max: 15 }, { key: 'over_15', min: 15, max: 999 }
-  ];
-
-  const candidates = {};
-
-  for (let sIdx = 0; sIdx < stripTexts.length; sIdx++) {
-    const stripText     = stripTexts[sIdx];
-    const stripWordList = stripWords[sIdx] || [];
-    const lines = stripText.replace(/,/g, '.').split('\n').map(l => l.trim()).filter(Boolean);
-    const foundInStrip = {};
-
-    for (let i = 0; i < lines.length; i++) {
-      const line       = lines[i];
-      const rangeMatch = line.match(/(\d+\.?\d*)\s*[-–—]\s*(\d+\.?\d*)/);
-      const overMatch  = line.match(/[>≥]\s*15/);
-      let matchedKey   = null;
-
-      if (rangeMatch) {
-        const minVal = parseFloat(rangeMatch[1]);
-        const maxVal = parseFloat(rangeMatch[2]);
-        const found = weightRanges.find(r =>
-          r.key === 'over_15'
-            ? Math.abs(r.min - minVal) <= 0.2 && maxVal >= 50
-            : Math.abs(r.min - minVal) <= 0.2 && Math.abs(r.max - Math.floor(maxVal)) <= 0.2
-        );
-        if (found) matchedKey = found.key;
-      } else if (overMatch) {
-        matchedKey = 'over_15';
-      }
-      if (!matchedKey) continue;
-
-      let parsedVal = null;
-      for (let offset = -1; offset <= 3; offset++) {
-        const t = i + offset;
-        if (t < 0 || t >= lines.length) continue;
-        if (lines[t].match(/T[oổ]ng/i)) continue;
-        const cm = lines[t].match(/([lI\d|!;:]+)\s*(?:đơn|don|hàng|hang)/i);
-        if (cm) {
-          const parsed = parseInt(normalizeNumber(cm[1]), 10);
-          if (Number.isFinite(parsed) && parsed >= 0) { parsedVal = parsed; break; }
-        }
-      }
-      if (parsedVal === null) {
-        for (let offset = 0; offset <= 3; offset++) {
-          const t = i + offset;
-          if (t >= lines.length) continue;
-          const pm = lines[t].match(/^\s*([lI\d|!;:]+)\s*$/);
-          if (pm) {
-            const parsed = parseInt(normalizeNumber(pm[1]), 10);
-            if (Number.isFinite(parsed) && parsed > 0) { parsedVal = parsed; break; }
-          }
-        }
-      }
-      if (parsedVal === null) continue;
-
-      const conf = findWordConfidence(stripWordList, parsedVal);
-      if (!candidates[matchedKey]) candidates[matchedKey] = [];
-      if (foundInStrip[matchedKey]) {
-        const existing = candidates[matchedKey].find(c => c.fromStrip === sIdx);
-        if (!(existing && (conf === null || (existing.confidence !== null && existing.confidence >= conf)))) {
-          candidates[matchedKey] = candidates[matchedKey].filter(c => c.fromStrip !== sIdx);
-          candidates[matchedKey].push({ value: parsedVal, confidence: conf, fromStrip: sIdx });
-        }
-      } else {
-        candidates[matchedKey].push({ value: parsedVal, confidence: conf, fromStrip: sIdx });
-        foundInStrip[matchedKey] = true;
-      }
-    }
-  }
-
-  Object.keys(candidates).forEach(k => {
-    const vals = candidates[k];
-    const counts = {};
-    vals.forEach(item => { counts[item.value] = (counts[item.value] || 0) + 1; });
-    let bestVal = vals[0].value, bestCount = 0;
-    Object.keys(counts).forEach(v => {
-      const c = counts[v], n = parseInt(v, 10);
-      if (c > bestCount || (c === bestCount && n > bestVal)) { bestVal = n; bestCount = c; }
-    });
-    weights[k] = bestVal;
-
-    let confSum = 0, confCount = 0;
-    vals.forEach(item => {
-      if (item.value === bestVal && item.confidence != null) { confSum += item.confidence; confCount++; }
-    });
-    confidences[k] = confCount > 0 ? (confSum / confCount) : null;
-  });
-
-  const totalFound = Object.values(weights).reduce((a, b) => a + b, 0);
-  return { detectedColorType, parsedDate, weights, confidences, expectedTotal, totalFound };
-}
-
-function findWordConfidence(words, numberStr) {
-  const target = String(numberStr);
-  let bestConf = null;
-  for (const w of words) {
-    if (!w || !w.text) continue;
-    const cleanW = w.text.replace(/[^0-9]/g, '');
-    if (cleanW === target) {
-      if (bestConf === null || w.confidence > bestConf) bestConf = w.confidence;
-    }
-  }
-  return bestConf;
-}
-
-function normalizeNumber(str) {
-  return str.replace(/[lI|!;:]/g, '1').replace(/[oOQ]/g, '0');
+  return getTodayIso();
 }
 
 // ==================== FILL MODAL ====================
@@ -467,7 +552,7 @@ export function fillModalFromResult(batchItem) {
   let confMsg = '';
   if (lowCount > 0)       confMsg = '\n\n🔴 ' + lowCount + ' dải cần kiểm tra (viền đỏ)';
   else if (midCount > 0)  confMsg = '\n\n🟡 ' + midCount + ' dải nên xem lại (viền vàng)';
-  else if (highCount > 0) confMsg = '\n\n🟢 Tất cả ' + highCount + ' dải đọc chắc chắn';
+  else if (highCount > 0) confMsg = '\n\n🟢 ' + highCount + ' dải đọc chắc chắn';
 
   alert('✅ Quét xong!\n- Tab: ' + typeText
       + '\n- Ngày: ' + formatDateDisplay(r.parsedDate)
@@ -475,7 +560,7 @@ export function fillModalFromResult(batchItem) {
       + '\n\n📷 Kéo xuống xem ẢNH GỐC để đối chiếu.');
 }
 
-// ==================== SO SÁNH OCR vs ĐÃ LƯU ====================
+// ==================== COMPARE ====================
 function buildCompareText(ocrW, existingW) {
   const suffixToWeight = {
     '0_2':'w0_2','2_4':'w2_4','4_6':'w4_6','6_8':'w6_8',
@@ -485,25 +570,17 @@ function buildCompareText(ocrW, existingW) {
     '0_2':'>0-2kg','2_4':'>2-4','4_6':'>4-6','6_8':'>6-8',
     '8_10':'>8-10','10_12':'>10-12','12_15':'>12-15','over_15':'>15'
   };
-
   let diffs = [];
   let matches = 0;
   Object.keys(suffixToWeight).forEach(k => {
     const ocr = parseInt(ocrW[k], 10) || 0;
     const ex  = parseInt(existingW[suffixToWeight[k]], 10) || 0;
-    if (ocr !== ex) {
-      diffs.push(`${labels[k]}: Đã lưu ${ex} ← OCR ${ocr}`);
-    } else if (ocr > 0 || ex > 0) {
-      matches++;
-    }
+    if (ocr !== ex) diffs.push(`${labels[k]}: Đã lưu ${ex} ← OCR ${ocr}`);
+    else if (ocr > 0 || ex > 0) matches++;
   });
-
-  if (diffs.length === 0) {
-    return { text: `✅ Khớp hoàn toàn với dữ liệu đã lưu (${matches} dải có số)`, diffs: 0 };
-  }
-
+  if (diffs.length === 0) return { text: `✅ Khớp hoàn toàn (${matches} dải)`, diffs: 0 };
   return {
-    text: `⚠️ Phát hiện ${diffs.length} dải KHÁC BIỆT:\n\n${diffs.join('\n')}\n\n→ Xem ảnh gốc bên dưới để đối chiếu, rồi sửa lại nếu cần.`,
+    text: `⚠️ ${diffs.length} dải KHÁC BIỆT:\n\n${diffs.join('\n')}\n\n→ Xem ảnh gốc để đối chiếu.`,
     diffs: diffs.length
   };
 }
@@ -523,15 +600,12 @@ export function openCompareModal(batchItem, existingRecord) {
       previewImg.src = r.fullDataUrl;
       previewBox.style.display = 'block';
     }
-
     const cmp = buildCompareText(r.weights, existingRecord.weights);
     const dateStr = formatDateDisplay(r.parsedDate);
-
     let msg = `📊 SO SÁNH NGÀY ${dateStr}\n\n`;
     msg += `📁 Dữ liệu ĐÃ LƯU được hiển thị trong ô nhập.\n`;
     msg += `📷 Ảnh OCR được hiển thị bên dưới.\n\n`;
     msg += cmp.text;
-
     alert(msg);
   }, 200);
 }
@@ -555,21 +629,13 @@ function renderBatchList() {
   const list = document.getElementById('batchList');
   list.innerHTML = '';
   document.getElementById('batchCount').innerText = batchResults.length;
-
   if (batchResults.length === 0) {
     list.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-muted);font-size:12px">Không có ảnh nào.</div>';
     return;
   }
-
-  const typeMap = {
-    del:  ['Giao', 'tag-delivery'],
-    pick: ['Lấy',  'tag-pickup'],
-    ret:  ['Hoàn', 'tag-return']
-  };
-
+  const typeMap = { del: ['Giao', 'tag-delivery'], pick: ['Lấy', 'tag-pickup'], ret: ['Hoàn', 'tag-return'] };
   batchResults.forEach((item, idx) => {
     const div = document.createElement('div');
-
     if (item.error) {
       div.className = 'batch-item error';
       div.innerHTML = `
@@ -584,7 +650,6 @@ function renderBatchList() {
     } else {
       const r = item.result;
       const [typeLabel, typeClass] = typeMap[r.detectedColorType];
-
       let lowCount = 0, midCount = 0;
       Object.values(r.confidences).forEach(c => {
         if (c == null) return;
@@ -594,20 +659,14 @@ function renderBatchList() {
       const confIcon  = lowCount > 0 ? ' 🔴' : midCount > 0 ? ' 🟡' : ' 🟢';
       const warnIcon  = (r.expectedTotal !== null && r.totalFound !== r.expectedTotal) ? ' ⚠️' : '';
       const cacheIcon = item.fromCache ? ' ⚡' : '';
-
-      const type = r.detectedColorType === 'del'  ? 'delivery'
-                 : r.detectedColorType === 'pick' ? 'pickup'
-                 : 'return';
+      const type = r.detectedColorType === 'del' ? 'delivery' : r.detectedColorType === 'pick' ? 'pickup' : 'return';
       const existing = state.appData[type].find(rec => rec.date === r.parsedDate);
-
       const actionBtn = existing
         ? `<button class="batch-btn batch-btn-compare" onclick="importBatchItem(${idx})">🔍 So sánh</button>`
         : `<button class="batch-btn batch-btn-import" onclick="importBatchItem(${idx})">📝 Nhập</button>`;
-
       const existingBadge = existing
         ? ` <span style="font-size:9px;padding:1px 5px;border-radius:4px;background:var(--glass-amber);border:1px solid var(--glass-amber-border);color:var(--glass-amber-text);font-weight:700">Đã có</span>`
         : '';
-
       div.className = 'batch-item';
       div.innerHTML = `
         <img class="batch-thumb" src="${item.thumbnail}" alt="">
@@ -634,25 +693,17 @@ export function removeBatchItem(idx) {
   renderBatchList();
 }
 
-// ==================== IMPORT FROM BATCH ====================
 export function importBatchItem(idx) {
   const item = batchResults[idx];
   if (!item || item.error) return;
-
   const r = item.result;
   const type = r.detectedColorType === 'del'  ? 'delivery'
              : r.detectedColorType === 'pick' ? 'pickup'
              : 'return';
   const existing = state.appData[type].find(rec => rec.date === r.parsedDate);
-
   closeBatchOcrModal();
-
-  if (existing) {
-    openCompareModal(item, existing);
-  } else {
-    fillModalFromResult(item);
-  }
-
+  if (existing) openCompareModal(item, existing);
+  else fillModalFromResult(item);
   showBackToBatchBtn(true);
 }
 
@@ -673,20 +724,16 @@ export function showBackToBatchBtn(show) {
   if (btn) btn.style.display = show ? 'inline-flex' : 'none';
 }
 
-export function hasBatchPending() {
-  return batchResults.length > 0;
-}
+export function hasBatchPending() { return batchResults.length > 0; }
 
 // ==================== SAVE BATCH ====================
 export function saveBatchAll() {
   const valid = batchResults.filter(r => !r.error);
   if (valid.length === 0) { alert('Không có dữ liệu hợp lệ để lưu!'); return; }
-
   const suffixMap = {
     '0_2':'w0_2','2_4':'w2_4','4_6':'w4_6','6_8':'w6_8',
     '8_10':'w8_10','10_12':'w10_12','12_15':'w12_15','over_15':'wover_15'
   };
-
   function buildWeights(r) {
     const w = {};
     WEIGHT_KEYS.forEach(wk => {
@@ -695,13 +742,10 @@ export function saveBatchAll() {
     });
     return w;
   }
-
   function getType(r) {
-    return r.detectedColorType === 'del'  ? 'delivery'
-         : r.detectedColorType === 'pick' ? 'pickup'
-         : 'return';
+    return r.detectedColorType === 'del' ? 'delivery'
+         : r.detectedColorType === 'pick' ? 'pickup' : 'return';
   }
-
   const seenInBatch = new Set();
   const dedupedBatch = [];
   let dupInBatch = 0;
@@ -712,7 +756,6 @@ export function saveBatchAll() {
     seenInBatch.add(key);
     dedupedBatch.push(item);
   });
-
   const finalList = [];
   let dupExisting = 0;
   dedupedBatch.forEach(item => {
@@ -722,39 +765,29 @@ export function saveBatchAll() {
     if (existing) { dupExisting++; return; }
     finalList.push({ item, type, weights: buildWeights(r) });
   });
-
   const totalSkipped = dupInBatch + dupExisting;
-
   if (finalList.length === 0) {
     let msg = '⚠️ Không có gì để lưu!\n';
     if (dupInBatch > 0)  msg += `\n• ${dupInBatch} ảnh trùng trong batch`;
     if (dupExisting > 0) msg += `\n• ${dupExisting} ảnh đã có ngày tồn tại trong Nhật ký`;
-    msg += '\n\n💡 Bấm "🔍 So sánh" để đối chiếu ảnh OCR với data đã lưu.';
+    msg += '\n\n💡 Bấm "🔍 So sánh" để đối chiếu.';
     alert(msg);
     return;
   }
-
-  let confirmMsg = `Lưu ${finalList.length} bản ghi mới vào nhật ký?`;
+  let confirmMsg = `Lưu ${finalList.length} bản ghi mới?`;
   if (totalSkipped > 0) {
     confirmMsg += `\n\n⚠️ Bỏ qua ${totalSkipped} ảnh:`;
     if (dupInBatch > 0)  confirmMsg += `\n  • ${dupInBatch} ảnh trùng trong batch`;
-    if (dupExisting > 0) confirmMsg += `\n  • ${dupExisting} ảnh đã có ngày tồn tại (giữ nguyên data cũ)`;
+    if (dupExisting > 0) confirmMsg += `\n  • ${dupExisting} ảnh đã có ngày (giữ data cũ)`;
   }
   if (!confirm(confirmMsg)) return;
-
   finalList.forEach(({ item, type, weights }) => {
-    state.appData[type].unshift({
-      id: generateId(),
-      date: item.result.parsedDate,
-      weights
-    });
+    state.appData[type].unshift({ id: generateId(), date: item.result.parsedDate, weights });
   });
-
   batchResults = [];
   showBackToBatchBtn(false);
   closeBatchOcrModal();
   updateAllViews();
-
   let doneMsg = `✅ Đã lưu ${finalList.length} bản ghi!`;
   if (totalSkipped > 0) doneMsg += `\n(Đã bỏ qua ${totalSkipped} ảnh)`;
   alert(doneMsg);
@@ -769,8 +802,7 @@ function escapeHtml(s) {
 // ==================== HIGHLIGHT ====================
 export function applyConfidenceHighlight(confMap, detectedType) {
   const prefix = detectedType === 'del' ? 'del_inp'
-               : detectedType === 'pick' ? 'pick_inp'
-               : 'ret_inp';
+               : detectedType === 'pick' ? 'pick_inp' : 'ret_inp';
   const keys = ['0_2','2_4','4_6','6_8','8_10','10_12','12_15','over_15'];
   keys.forEach(k => {
     const input = document.getElementById(prefix + '_' + k);
@@ -782,7 +814,7 @@ export function applyConfidenceHighlight(confMap, detectedType) {
       if (old) old.remove();
     }
     if (confMap[k] == null) return;
-    const conf  = confMap[k];
+    const conf = confMap[k];
     const level = conf >= 85 ? 'high' : conf >= 70 ? 'mid' : 'low';
     input.classList.add('conf-' + level);
     if (parent) {
@@ -809,7 +841,6 @@ export function clearAllConfidenceHighlights() {
   }));
 }
 
-// ==================== LIGHTBOX ====================
 export function openOcrLightbox() {
   const src = document.getElementById('ocrPreviewImg').src;
   if (!src) return;
