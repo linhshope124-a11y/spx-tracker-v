@@ -1,7 +1,7 @@
 import { state } from './state.js';
 import { WEIGHT_KEYS } from './config.js';
 import { getTodayIso, formatDateDisplay, generateId } from './utils.js';
-import { openAddModal, switchModalSubTab } from './ui.js';
+import { openAddModal, openEditModal, switchModalSubTab } from './ui.js';
 import { updateAllViews } from './render.js';
 
 // ==================== TESSERACT WORKER ====================
@@ -475,6 +475,67 @@ export function fillModalFromResult(batchItem) {
       + '\n\n📷 Kéo xuống xem ẢNH GỐC để đối chiếu.');
 }
 
+// ==================== SO SÁNH OCR vs ĐÃ LƯU ====================
+function buildCompareText(ocrW, existingW) {
+  const suffixToWeight = {
+    '0_2':'w0_2','2_4':'w2_4','4_6':'w4_6','6_8':'w6_8',
+    '8_10':'w8_10','10_12':'w10_12','12_15':'w12_15','over_15':'wover_15'
+  };
+  const labels = {
+    '0_2':'>0-2kg','2_4':'>2-4','4_6':'>4-6','6_8':'>6-8',
+    '8_10':'>8-10','10_12':'>10-12','12_15':'>12-15','over_15':'>15'
+  };
+
+  let diffs = [];
+  let matches = 0;
+  Object.keys(suffixToWeight).forEach(k => {
+    const ocr = parseInt(ocrW[k], 10) || 0;
+    const ex  = parseInt(existingW[suffixToWeight[k]], 10) || 0;
+    if (ocr !== ex) {
+      diffs.push(`${labels[k]}: Đã lưu ${ex} ← OCR ${ocr}`);
+    } else if (ocr > 0 || ex > 0) {
+      matches++;
+    }
+  });
+
+  if (diffs.length === 0) {
+    return { text: `✅ Khớp hoàn toàn với dữ liệu đã lưu (${matches} dải có số)`, diffs: 0 };
+  }
+
+  return {
+    text: `⚠️ Phát hiện ${diffs.length} dải KHÁC BIỆT:\n\n${diffs.join('\n')}\n\n→ Xem ảnh gốc bên dưới để đối chiếu, rồi sửa lại nếu cần.`,
+    diffs: diffs.length
+  };
+}
+
+export function openCompareModal(batchItem, existingRecord) {
+  const r = batchItem.result;
+  const type = r.detectedColorType === 'del'  ? 'delivery'
+             : r.detectedColorType === 'pick' ? 'pickup'
+             : 'return';
+
+  openEditModal(type, existingRecord.id);
+
+  setTimeout(() => {
+    const previewBox = document.getElementById('ocrPreviewBox');
+    const previewImg = document.getElementById('ocrPreviewImg');
+    if (previewBox && previewImg && r.fullDataUrl) {
+      previewImg.src = r.fullDataUrl;
+      previewBox.style.display = 'block';
+    }
+
+    const cmp = buildCompareText(r.weights, existingRecord.weights);
+    const dateStr = formatDateDisplay(r.parsedDate);
+
+    let msg = `📊 SO SÁNH NGÀY ${dateStr}\n\n`;
+    msg += `📁 Dữ liệu ĐÃ LƯU được hiển thị trong ô nhập.\n`;
+    msg += `📷 Ảnh OCR được hiển thị bên dưới.\n\n`;
+    msg += cmp.text;
+
+    alert(msg);
+  }, 200);
+}
+
 // ==================== BATCH MODAL ====================
 export function openBatchOcrModal() {
   renderBatchList();
@@ -534,19 +595,32 @@ function renderBatchList() {
       const warnIcon  = (r.expectedTotal !== null && r.totalFound !== r.expectedTotal) ? ' ⚠️' : '';
       const cacheIcon = item.fromCache ? ' ⚡' : '';
 
+      const type = r.detectedColorType === 'del'  ? 'delivery'
+                 : r.detectedColorType === 'pick' ? 'pickup'
+                 : 'return';
+      const existing = state.appData[type].find(rec => rec.date === r.parsedDate);
+
+      const actionBtn = existing
+        ? `<button class="batch-btn batch-btn-compare" onclick="importBatchItem(${idx})">🔍 So sánh</button>`
+        : `<button class="batch-btn batch-btn-import" onclick="importBatchItem(${idx})">📝 Nhập</button>`;
+
+      const existingBadge = existing
+        ? ` <span style="font-size:9px;padding:1px 5px;border-radius:4px;background:var(--glass-amber);border:1px solid var(--glass-amber-border);color:var(--glass-amber-text);font-weight:700">Đã có</span>`
+        : '';
+
       div.className = 'batch-item';
       div.innerHTML = `
         <img class="batch-thumb" src="${item.thumbnail}" alt="">
         <div class="batch-info">
           <div class="batch-title">
             <span class="hist-badge-tag ${typeClass}">${typeLabel}</span>
-            <span>${formatDateDisplay(r.parsedDate)}${confIcon}${warnIcon}${cacheIcon}</span>
+            <span>${formatDateDisplay(r.parsedDate)}${confIcon}${warnIcon}${cacheIcon}${existingBadge}</span>
           </div>
           <div class="batch-meta">${escapeHtml(item.file)}</div>
           <div class="batch-total">${r.totalFound} đơn</div>
         </div>
         <div class="batch-actions">
-          <button class="batch-btn batch-btn-import" onclick="importBatchItem(${idx})">📝 Nhập</button>
+          ${actionBtn}
           <button class="batch-btn batch-btn-remove" onclick="removeBatchItem(${idx})">✕ Bỏ</button>
         </div>`;
     }
@@ -560,12 +634,25 @@ export function removeBatchItem(idx) {
   renderBatchList();
 }
 
-// ==================== IMPORT FROM BATCH + QUAY LẠI ====================
+// ==================== IMPORT FROM BATCH ====================
 export function importBatchItem(idx) {
   const item = batchResults[idx];
   if (!item || item.error) return;
+
+  const r = item.result;
+  const type = r.detectedColorType === 'del'  ? 'delivery'
+             : r.detectedColorType === 'pick' ? 'pickup'
+             : 'return';
+  const existing = state.appData[type].find(rec => rec.date === r.parsedDate);
+
   closeBatchOcrModal();
-  fillModalFromResult(item);
+
+  if (existing) {
+    openCompareModal(item, existing);
+  } else {
+    fillModalFromResult(item);
+  }
+
   showBackToBatchBtn(true);
 }
 
@@ -609,8 +696,10 @@ export function saveBatchAll() {
     return w;
   }
 
-  function weightsEqual(a, b) {
-    return WEIGHT_KEYS.every(k => (parseInt(a[k], 10) || 0) === (parseInt(b[k], 10) || 0));
+  function getType(r) {
+    return r.detectedColorType === 'del'  ? 'delivery'
+         : r.detectedColorType === 'pick' ? 'pickup'
+         : 'return';
   }
 
   const seenInBatch = new Set();
@@ -618,7 +707,7 @@ export function saveBatchAll() {
   let dupInBatch = 0;
   valid.forEach(item => {
     const r = item.result;
-    const key = r.detectedColorType + '|' + r.parsedDate + '|' + JSON.stringify(r.weights);
+    const key = getType(r) + '|' + r.parsedDate;
     if (seenInBatch.has(key)) { dupInBatch++; return; }
     seenInBatch.add(key);
     dedupedBatch.push(item);
@@ -628,32 +717,28 @@ export function saveBatchAll() {
   let dupExisting = 0;
   dedupedBatch.forEach(item => {
     const r = item.result;
-    const type = r.detectedColorType === 'del'  ? 'delivery'
-               : r.detectedColorType === 'pick' ? 'pickup'
-               : 'return';
-    const weights = buildWeights(r);
-    const isDup = state.appData[type].some(rec =>
-      rec.date === r.parsedDate && weightsEqual(rec.weights, weights)
-    );
-    if (isDup) { dupExisting++; return; }
-    finalList.push({ item, type, weights });
+    const type = getType(r);
+    const existing = state.appData[type].find(rec => rec.date === r.parsedDate);
+    if (existing) { dupExisting++; return; }
+    finalList.push({ item, type, weights: buildWeights(r) });
   });
 
   const totalSkipped = dupInBatch + dupExisting;
 
   if (finalList.length === 0) {
     let msg = '⚠️ Không có gì để lưu!\n';
-    if (dupInBatch > 0)  msg += `\n• ${dupInBatch} ảnh trùng nhau trong batch`;
-    if (dupExisting > 0) msg += `\n• ${dupExisting} ảnh trùng với dữ liệu đã lưu`;
+    if (dupInBatch > 0)  msg += `\n• ${dupInBatch} ảnh trùng trong batch`;
+    if (dupExisting > 0) msg += `\n• ${dupExisting} ảnh đã có ngày tồn tại trong Nhật ký`;
+    msg += '\n\n💡 Bấm "🔍 So sánh" để đối chiếu ảnh OCR với data đã lưu.';
     alert(msg);
     return;
   }
 
-  let confirmMsg = `Lưu ${finalList.length} bản ghi vào nhật ký?`;
+  let confirmMsg = `Lưu ${finalList.length} bản ghi mới vào nhật ký?`;
   if (totalSkipped > 0) {
-    confirmMsg += `\n\n⚠️ Bỏ qua ${totalSkipped} bản ghi trùng:`;
-    if (dupInBatch > 0)  confirmMsg += `\n  • ${dupInBatch} ảnh trùng nhau trong batch`;
-    if (dupExisting > 0) confirmMsg += `\n  • ${dupExisting} ảnh đã lưu trước đó`;
+    confirmMsg += `\n\n⚠️ Bỏ qua ${totalSkipped} ảnh:`;
+    if (dupInBatch > 0)  confirmMsg += `\n  • ${dupInBatch} ảnh trùng trong batch`;
+    if (dupExisting > 0) confirmMsg += `\n  • ${dupExisting} ảnh đã có ngày tồn tại (giữ nguyên data cũ)`;
   }
   if (!confirm(confirmMsg)) return;
 
@@ -671,7 +756,7 @@ export function saveBatchAll() {
   updateAllViews();
 
   let doneMsg = `✅ Đã lưu ${finalList.length} bản ghi!`;
-  if (totalSkipped > 0) doneMsg += `\n(Đã bỏ qua ${totalSkipped} bản ghi trùng)`;
+  if (totalSkipped > 0) doneMsg += `\n(Đã bỏ qua ${totalSkipped} ảnh)`;
   alert(doneMsg);
 }
 
