@@ -125,11 +125,31 @@ export async function pullFromCloud() {
     const parsed = JSON.parse(content);
     if (!parsed.data || !parsed.data.delivery) throw new Error('Dữ liệu không hợp lệ');
 
+    // Dọn trùng lặp tự động khi restore
+    function dedupeList(list) {
+      const seen = new Set();
+      return list.filter(r => {
+        const key = r.date + '|' + (r.weights ? Object.values(r.weights).join('_') : '');
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    }
+
+    const originalDel  = parsed.data.delivery || [];
+    const originalPick = parsed.data.pickup   || [];
+    const originalRet  = parsed.data.return   || [];
+
     state.appData = {
-      delivery: parsed.data.delivery || [],
-      pickup: parsed.data.pickup || [],
-      return: parsed.data.return || []
+      delivery: dedupeList(originalDel),
+      pickup:   dedupeList(originalPick),
+      return:   dedupeList(originalRet)
     };
+
+    const removedCount = (originalDel.length - state.appData.delivery.length)
+                       + (originalPick.length - state.appData.pickup.length)
+                       + (originalRet.length - state.appData.return.length);
+
     if (parsed.settings) {
       if (typeof parsed.settings.rankName === 'string') state.rankName = parsed.settings.rankName;
       if (Number.isFinite(parsed.settings.rankBonus)) state.rankBonus = parsed.settings.rankBonus;
@@ -161,8 +181,11 @@ export async function pullFromCloud() {
     const { updateAllViews } = await import('./render.js');
     initRankUI();
     updateAllViews();
+
+    let doneMsg = '✅ Khôi phục từ Cloud thành công!';
+    if (removedCount > 0) doneMsg += `\n\n🧹 Đã tự động bỏ qua ${removedCount} bản ghi trùng lặp.`;
     setStatus('✅ Khôi phục thành công!', 'ok');
-    alert('Đã khôi phục từ Cloud!');
+    alert(doneMsg);
   } catch (e) {
     setStatus(`❌ Lỗi: ${e.message}`, 'err');
   }
