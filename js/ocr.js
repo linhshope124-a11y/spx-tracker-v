@@ -28,7 +28,8 @@ async function getTesseractWorker() {
       }
     });
     await worker.setParameters({
-      tessedit_pageseg_mode: Tesseract.PSM.SPARSE_TEXT,
+      tessedit_pageseg_mode: Tesseract.PSM.SINGLE_BLOCK,
+      tessedit_char_whitelist: '0123456789.- ',
       preserve_interword_spaces: '1',
       tessedit_do_invert: '0'
     });
@@ -98,13 +99,13 @@ function otsuThreshold(gray) {
 
 // ==================== PREPROCESSING ====================
 async function preprocessImage(rawDataUrl, options = {}) {
-  const { upscale = 1.5, useOtsu = true } = options;
+  const { upscale = 2.0, useOtsu = true, sharpen = false, threshold = 145 } = options;
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
       try {
-        const scale = Math.min(2, upscale * (2000 / Math.max(img.width, 1)));
+        const scale = Math.min(3, upscale);
         const canvas = document.createElement('canvas');
         canvas.width  = Math.floor(img.width  * scale);
         canvas.height = Math.floor(img.height * scale);
@@ -117,36 +118,43 @@ async function preprocessImage(rawDataUrl, options = {}) {
         const data = imgData.data;
         const w = canvas.width, h = canvas.height;
 
+        // Grayscale
         const gray = new Uint8Array(w * h);
         for (let i = 0, j = 0; i < data.length; i += 4, j++) {
           gray[j] = Math.round(data[i] * 0.299 + data[i+1] * 0.587 + data[i+2] * 0.114);
         }
 
-        const sharpened = new Uint8Array(w * h);
-        const kernel = [0, -1, 0, -1, 5, -1, 0, -1, 0];
-        for (let y = 1; y < h - 1; y++) {
-          for (let x = 1; x < w - 1; x++) {
-            let sum = 0, ki = 0;
-            for (let dy = -1; dy <= 1; dy++) {
-              for (let dx = -1; dx <= 1; dx++) {
-                sum += gray[(y + dy) * w + (x + dx)] * kernel[ki++];
+        let processed = gray;
+        // Sharpen chỉ khi bật (mặc định tắt để tránh méo chữ)
+        if (sharpen) {
+          const sharpened = new Uint8Array(w * h);
+          const kernel = [0, -1, 0, -1, 5, -1, 0, -1, 0];
+          for (let y = 1; y < h - 1; y++) {
+            for (let x = 1; x < w - 1; x++) {
+              let sum = 0, ki = 0;
+              for (let dy = -1; dy <= 1; dy++) {
+                for (let dx = -1; dx <= 1; dx++) {
+                  sum += gray[(y + dy) * w + (x + dx)] * kernel[ki++];
+                }
               }
+              sharpened[y * w + x] = Math.max(0, Math.min(255, sum));
             }
-            sharpened[y * w + x] = Math.max(0, Math.min(255, sum));
           }
-        }
-        for (let x = 0; x < w; x++) {
-          sharpened[x] = gray[x];
-          sharpened[(h - 1) * w + x] = gray[(h - 1) * w + x];
-        }
-        for (let y = 0; y < h; y++) {
-          sharpened[y * w] = gray[y * w];
-          sharpened[y * w + w - 1] = gray[y * w + w - 1];
+          for (let x = 0; x < w; x++) {
+            sharpened[x] = gray[x];
+            sharpened[(h - 1) * w + x] = gray[(h - 1) * w + x];
+          }
+          for (let y = 0; y < h; y++) {
+            sharpened[y * w] = gray[y * w];
+            sharpened[y * w + w - 1] = gray[y * w + w - 1];
+          }
+          processed = sharpened;
         }
 
-        const threshold = useOtsu ? otsuThreshold(sharpened) : 145;
+        // Binarize
+        const th = useOtsu ? otsuThreshold(processed) : threshold;
         for (let i = 0, j = 0; i < data.length; i += 4, j++) {
-          const val = sharpened[j] > threshold ? 255 : 0;
+          const val = processed[j] > th ? 255 : 0;
           data[i] = data[i+1] = data[i+2] = val;
           data[i+3] = 255;
         }
@@ -203,8 +211,8 @@ function detectActiveTabByOrangeLine(imageSource) {
   });
 }
 
-// ==================== OCR VỚI WORDS ====================
-async function ocrWithWords(preprocessedDataUrl) {
+// ==================== OCR ====================
+async function ocrRecognize(preprocessedDataUrl) {
   const worker = await getTesseractWorker();
   const result = await worker.recognize(preprocessedDataUrl);
   const words = [];
@@ -219,10 +227,8 @@ async function ocrWithWords(preprocessedDataUrl) {
         digits: digits,
         value: parseInt(digits, 10),
         confidence: word.confidence || 0,
-        y0: word.bbox.y0,
-        y1: word.bbox.y1,
-        x0: word.bbox.x0,
-        x1: word.bbox.x1,
+        y0: word.bbox.y0, y1: word.bbox.y1,
+        x0: word.bbox.x0, x1: word.bbox.x1,
         cy: (word.bbox.y0 + word.bbox.y1) / 2
       });
     });
@@ -230,120 +236,107 @@ async function ocrWithWords(preprocessedDataUrl) {
   return { words, text: result.data.text || '' };
 }
 
-// ==================== PARSE CHÍNH — MATCH THEO VỊ TRÍ TEXT ====================
+// ==================== PARSE: MATCH THEO LINE ====================
 function parseByRowLayout(words, detectedColorType, cleanText) {
   const weights = { '0_2':0,'2_4':0,'4_6':0,'6_8':0,'8_10':0,'10_12':0,'12_15':0,'over_15':0 };
   const confidences = {};
 
   const text = cleanText.replace(/[–—]/g, '-');
 
-  // 1. Tìm Tổng đơn kỳ vọng
+  // 1. Tổng đơn kỳ vọng
   const totalRegex = /T[oổ]ng\s*[:\-]?\s*(\d{1,6})\s*[đd][ơơ]n/i;
   const totalMatch = text.match(totalRegex);
   let expectedTotal = totalMatch ? parseInt(totalMatch[1], 10) : null;
   if (!Number.isFinite(expectedTotal)) expectedTotal = null;
-  const totalPos = totalMatch ? totalMatch.index : -1;
 
-  // 2. Tìm tất cả RANGE (X.XXX - Y.YYY hoặc X - Y)
-  const rangeRegex = /(\d{1,2})(?:\.\d{1,3})?\s*-\s*(\d{1,2})(?:\.\d{1,3})?/g;
-  const rangeMatches = [];
-  let m;
-  while ((m = rangeRegex.exec(text)) !== null) {
-    const minV = parseInt(m[1], 10);
-    const maxV = parseInt(m[2], 10);
-    const rangeDefs = [
-      { key: '0_2', min: 0, max: 2 },
-      { key: '2_4', min: 2, max: 4 },
-      { key: '4_6', min: 4, max: 6 },
-      { key: '6_8', min: 6, max: 8 },
-      { key: '8_10', min: 8, max: 10 },
-      { key: '10_12', min: 10, max: 12 },
-      { key: '12_15', min: 12, max: 15 }
-    ];
-    const def = rangeDefs.find(d => d.min === minV && d.max === maxV);
-    if (def) {
-      rangeMatches.push({ key: def.key, pos: m.index, full: m[0] });
-    } else if (minV === 15 && maxV > 15) {
-      rangeMatches.push({ key: 'over_15', pos: m.index, full: m[0] });
+  // 2. Nhóm words thành lines theo Y
+  if (!words || words.length === 0) {
+    return { weights, confidences, expectedTotal, totalFound: 0 };
+  }
+  const sorted = [...words].sort((a, b) => a.cy - b.cy);
+  const lines = [];
+  let cur = [sorted[0]];
+  for (let i = 1; i < sorted.length; i++) {
+    if (Math.abs(sorted[i].cy - cur[cur.length - 1].cy) <= 30) {
+      cur.push(sorted[i]);
+    } else {
+      lines.push(cur);
+      cur = [sorted[i]];
     }
   }
+  if (cur.length) lines.push(cur);
 
-  // 3. Tìm tất cả COUNTS (N Đơn hàng)
-  const countRegex = /(\d{1,6})\s*(?:[Đđ]ơn|[đd]on)\s*(?:hàng|hang)?/g;
-  const countMatches = [];
-  while ((m = countRegex.exec(text)) !== null) {
-    const value = parseInt(m[1], 10);
-    if (totalPos >= 0 && Math.abs(m.index - totalPos) < 15) continue;
-    if (value < 0 || value > 99999) continue;
-    countMatches.push({ value, pos: m.index, raw: m[0] });
-  }
+  // 3. Range definitions
+  const rangeDefs = [
+    { key: '0_2',     min: 0,  max: 2 },
+    { key: '2_4',     min: 2,  max: 4 },
+    { key: '4_6',     min: 4,  max: 6 },
+    { key: '6_8',     min: 6,  max: 8 },
+    { key: '8_10',    min: 8,  max: 10 },
+    { key: '10_12',   min: 10, max: 12 },
+    { key: '12_15',   min: 12, max: 15 },
+    { key: 'over_15', min: 15, max: 999 }
+  ];
 
-  // 4. Match range ↔ count gần nhất
-  const usedCounts = new Set();
-  rangeMatches.forEach(r => {
-    if (weights[r.key] > 0) return;
-    let best = null, bestDist = 9999;
-    countMatches.forEach(c => {
-      if (usedCounts.has(c.pos)) return;
-      const dist = Math.abs(c.pos - r.pos);
-      if (dist < bestDist) {
-        bestDist = dist;
-        best = c;
-      }
-    });
-    if (best && bestDist < 150) {
-      weights[r.key] = best.value;
-      confidences[r.key] = 88;
-      usedCounts.add(best.pos);
+  // 4. Duyệt từng line để tìm range + count
+  for (let li = 0; li < lines.length; li++) {
+    const line = lines[li];
+
+    // Tìm range trong line này (có thể là 2 số liền kề VD "0.000 2.001")
+    let rangeKey = null;
+    for (let i = 0; i < line.length - 1; i++) {
+      const a = parseInt(line[i].digits, 10);
+      const b = parseInt(line[i + 1].digits, 10);
+      if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
+      const def = rangeDefs.find(d =>
+        d.min === a && (d.max === b || (d.key === 'over_15' && b > 15))
+      );
+      if (def) { rangeKey = def.key; break; }
     }
-  });
 
-  // 5. Fallback: match theo words[] nếu regex không đủ
-  const matchedCount = Object.values(weights).filter(v => v > 0).length;
-  if (matchedCount < 3 && words && words.length > 0) {
-    const sorted = [...words].sort((a, b) => a.cy - b.cy);
-    const lines = [];
-    let cur = [sorted[0]];
-    for (let i = 1; i < sorted.length; i++) {
-      if (Math.abs(sorted[i].cy - cur[cur.length - 1].cy) <= 25) cur.push(sorted[i]);
-      else { lines.push(cur); cur = [sorted[i]]; }
-    }
-    if (cur.length) lines.push(cur);
+    if (!rangeKey) continue;
+    if (weights[rangeKey] > 0) continue;
 
-    const rangeDefs = [
-      { key: '0_2', min: 0, max: 2 }, { key: '2_4', min: 2, max: 4 },
-      { key: '4_6', min: 4, max: 6 }, { key: '6_8', min: 6, max: 8 },
-      { key: '8_10', min: 8, max: 10 }, { key: '10_12', min: 10, max: 12 },
-      { key: '12_15', min: 12, max: 15 }, { key: 'over_15', min: 15, max: 999 }
-    ];
+    // Tìm count gần nhất — ưu tiên:
+    //   a) Cùng line (bên phải range)
+    //   b) Line trên (SPX layout: count ở dòng trên range)
+    //   c) Line dưới
+    // Loại trừ "Tổng X đơn" (số > tổng kỳ vọng hoặc trùng vị trí)
+    const candidates = [];
 
-    for (let li = 0; li < lines.length; li++) {
-      const line = lines[li];
-      for (let i = 0; i < line.length - 1; i++) {
-        const a = parseInt(line[i].digits, 10);
-        const b = parseInt(line[i + 1].digits, 10);
-        if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
-        const def = rangeDefs.find(d => d.min === a && (d.max === b || (d.key === 'over_15' && b > 15)));
-        if (!def || weights[def.key] > 0) continue;
-
-        const yRange = (line[i].cy + line[i + 1].cy) / 2;
-        let best = null, bestDist = 99999;
-        lines.forEach((otherLine, oi) => {
-          const txt = otherLine.map(w => w.text).join(' ');
-          if (!/[Đđ]ơn|[đd]on/i.test(txt)) return;
-          otherLine.forEach(w => {
-            const v = parseInt(w.digits, 10);
-            if (!Number.isFinite(v) || v < 1 || v > 99999) return;
-            const dist = Math.abs(w.cy - yRange) + Math.abs(oi - li) * 50;
-            if (dist < bestDist) { bestDist = dist; best = { value: v, conf: w.confidence }; }
-          });
+    const collectFromLine = (targetLine, distancePenalty) => {
+      targetLine.forEach(w => {
+        const v = w.value;
+        if (!Number.isFinite(v) || v < 1 || v > 99999) return;
+        // Loại số tổng
+        if (expectedTotal !== null && v === expectedTotal) return;
+        candidates.push({
+          value: v,
+          confidence: w.confidence,
+          distance: distancePenalty + Math.abs(w.cy - line[0].cy)
         });
-        if (best) {
-          weights[def.key] = best.value;
-          confidences[def.key] = best.conf;
-        }
-      }
-    }
+      });
+    };
+
+    // a) Cùng line
+    collectFromLine(line, 0);
+    // b) Line trên (ưu tiên cao nhất cho SPX format)
+    if (li > 0) collectFromLine(lines[li - 1], 5);
+    // c) Line dưới
+    if (li < lines.length - 1) collectFromLine(lines[li + 1], 20);
+
+    if (candidates.length === 0) continue;
+
+    // Ưu tiên: line trên > cùng line > line dưới
+    // Nếu cùng distance thì chọn confidence cao
+    candidates.sort((a, b) => {
+      if (Math.abs(a.distance - b.distance) > 10) return a.distance - b.distance;
+      return b.confidence - a.confidence;
+    });
+
+    const best = candidates[0];
+    weights[rangeKey] = best.value;
+    confidences[rangeKey] = best.confidence;
   }
 
   const totalFound = Object.values(weights).reduce((a, b) => a + b, 0);
@@ -410,7 +403,6 @@ export async function handleOcrImage(event) {
     }
 
     const validCount = newResults.filter(r => !r.error).length;
-
     if (files.length === 1 && validCount === 1) {
       fillModalFromResult(newResults[0]);
       return;
@@ -460,31 +452,50 @@ async function processFiles(files) {
       statusDesc.innerText = 'Xác định tab...';
       const detectedType = await detectActiveTabByOrangeLine(rawDataUrl);
 
-      statusDesc.innerText = 'Tiền xử lý ảnh...';
-      const pre1 = await preprocessImage(rawDataUrl, { upscale: 1.5, useOtsu: true });
+      statusDesc.innerText = 'Tiền xử lý (1/3)...';
+      const pre1 = await preprocessImage(rawDataUrl, { upscale: 2.0, useOtsu: true, sharpen: false });
 
       statusDesc.innerText = 'Đang quét (lần 1)...';
-      const ocr1 = await ocrWithWords(pre1.dataUrl);
+      const ocr1 = await ocrRecognize(pre1.dataUrl);
       const parsed1 = parseByRowLayout(ocr1.words, detectedType || 'del', ocr1.text);
 
       let finalResult = parsed1;
+      let finalOcrText = ocr1.text;
       const needRetry = parsed1.totalFound === 0 ||
-                        (parsed1.expectedTotal !== null && Math.abs(parsed1.totalFound - parsed1.expectedTotal) > 5);
+                        (parsed1.expectedTotal !== null && Math.abs(parsed1.totalFound - parsed1.expectedTotal) > 0);
 
       if (needRetry) {
-        statusDesc.innerText = 'Đang quét lại (lần 2)...';
-        const pre2 = await preprocessImage(rawDataUrl, { upscale: 2.0, useOtsu: false });
-        const ocr2 = await ocrWithWords(pre2.dataUrl);
+        statusDesc.innerText = 'Phát hiện sai — quét lại (lần 2)...';
+        const pre2 = await preprocessImage(rawDataUrl, { upscale: 2.5, useOtsu: false, threshold: 130, sharpen: true });
+        const ocr2 = await ocrRecognize(pre2.dataUrl);
         const parsed2 = parseByRowLayout(ocr2.words, detectedType || 'del', ocr2.text);
 
         const diff1 = parsed1.expectedTotal !== null ? Math.abs(parsed1.totalFound - parsed1.expectedTotal) : 9999;
         const diff2 = parsed2.expectedTotal !== null ? Math.abs(parsed2.totalFound - parsed2.expectedTotal) : 9999;
-        finalResult = diff2 < diff1 ? parsed2 : parsed1;
+
+        if (diff2 < diff1) {
+          finalResult = parsed2;
+          finalOcrText = ocr2.text;
+        }
+
+        // Nếu vẫn sai → thử pass 3 với ngưỡng khác
+        if (finalResult.expectedTotal !== null && Math.abs(finalResult.totalFound - finalResult.expectedTotal) > 0) {
+          statusDesc.innerText = 'Vẫn sai — quét lần 3...';
+          const pre3 = await preprocessImage(rawDataUrl, { upscale: 2.0, useOtsu: false, threshold: 160, sharpen: false });
+          const ocr3 = await ocrRecognize(pre3.dataUrl);
+          const parsed3 = parseByRowLayout(ocr3.words, detectedType || 'del', ocr3.text);
+
+          const diff3 = parsed3.expectedTotal !== null ? Math.abs(parsed3.totalFound - parsed3.expectedTotal) : 9999;
+          if (diff3 < Math.abs(finalResult.totalFound - (finalResult.expectedTotal || 0))) {
+            finalResult = parsed3;
+            finalOcrText = ocr3.text;
+          }
+        }
       }
 
       const result = {
         detectedColorType: detectedType || 'del',
-        parsedDate: extractDate(ocr1.text),
+        parsedDate: extractDate(finalOcrText),
         weights: finalResult.weights,
         confidences: finalResult.confidences,
         expectedTotal: finalResult.expectedTotal,
@@ -493,7 +504,6 @@ async function processFiles(files) {
       };
 
       out.push({ file: file.name, thumbnail, result, error: null });
-
       cacheSet(hash, { thumbnail, result: { ...result, fullDataUrl: '' } });
     } catch (err) {
       console.error('[OCR]', file.name, err);
