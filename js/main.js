@@ -43,6 +43,29 @@ if ('serviceWorker' in navigator) {
   });
 }
 
+// Lưu manual points ngay vào localStorage + delay render
+let manualPointsTimer = null;
+function _saveManualPoints() {
+  const buuCuc = parseInt(document.getElementById('manualBuuCucInput').value, 10) || 0;
+  const taiXe  = parseInt(document.getElementById('manualTaiXeInput').value, 10) || 0;
+  state.manualPoints = { buuCuc, taiXe };
+  localStorage.setItem('spx_manual_points', JSON.stringify(state.manualPoints));
+  clearTimeout(manualPointsTimer);
+  manualPointsTimer = setTimeout(() => updateAllViews(), 300);
+}
+
+// Lưu salary ngay vào localStorage + delay render
+let salaryTimer = null;
+function _saveSalaryConfig() {
+  const salary = parseFloat(document.getElementById('salaryBaseInput').value) || 0;
+  state.manualSalary = salary;
+  state.salaryDays = 26;
+  localStorage.setItem('spx_manual_salary', salary);
+  localStorage.setItem('spx_salary_days', 26);
+  clearTimeout(salaryTimer);
+  salaryTimer = setTimeout(() => updateAllViews(), 300);
+}
+
 Object.assign(window, {
   toggleTheme,
   switchMainTab, switchModalSubTab, setOverviewFilter, setPeriodFilter, setHistFilter,
@@ -60,18 +83,28 @@ Object.assign(window, {
   testCloudConnection, pushToCloud, pullFromCloud, initCloudUI,
   undoLast, toggleCharts,
 
-  saveManualPoints: function() {
-    state.manualPoints.buuCuc = parseInt(document.getElementById('manualBuuCucInput').value, 10) || 0;
-    state.manualPoints.taiXe  = parseInt(document.getElementById('manualTaiXeInput').value, 10) || 0;
-    localStorage.setItem('spx_manual_points', JSON.stringify(state.manualPoints));
-    updateAllViews();
-  },
-  saveSalaryConfig: function() {
-    state.manualSalary = parseFloat(document.getElementById('salaryBaseInput').value) || 0;
+  saveManualPoints: _saveManualPoints,
+  saveSalaryConfig: _saveSalaryConfig,
+
+  // Nút "Lưu cấu hình" — force save ngay, không debounce
+  forceSaveConfig: function() {
+    const buuCuc = parseInt(document.getElementById('manualBuuCucInput').value, 10) || 0;
+    const taiXe  = parseInt(document.getElementById('manualTaiXeInput').value, 10) || 0;
+    const salary = parseFloat(document.getElementById('salaryBaseInput').value) || 0;
+
+    state.manualPoints = { buuCuc, taiXe };
+    state.manualSalary = salary;
     state.salaryDays = 26;
-    localStorage.setItem('spx_manual_salary', state.manualSalary);
+
+    localStorage.setItem('spx_manual_points', JSON.stringify(state.manualPoints));
+    localStorage.setItem('spx_manual_salary', salary);
     localStorage.setItem('spx_salary_days', 26);
+
+    clearTimeout(manualPointsTimer);
+    clearTimeout(salaryTimer);
     updateAllViews();
+
+    alert('✅ Đã lưu cấu hình!\n\n• Lương: ' + salary.toLocaleString('vi-VN') + '\n• Bưu cục: ' + buuCuc.toLocaleString('vi-VN') + '\n• Tài xế: ' + taiXe.toLocaleString('vi-VN'));
   }
 });
 
