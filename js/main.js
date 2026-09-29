@@ -67,7 +67,7 @@ function _saveSalaryConfig() {
   salaryTimer = setTimeout(() => updateAllViews(), 300);
 }
 
-// === Tìm bản ghi trùng (cùng type + cùng ngày + cùng số liệu) ===
+// === Tìm bản ghi trùng ===
 function _findDuplicates() {
   const dups = [];
   ['delivery', 'pickup', 'return'].forEach(type => {
@@ -84,38 +84,63 @@ function _findDuplicates() {
   return dups;
 }
 
-// === Dọn trùng: xóa hết các bản trùng, giữ lại 1 ===
+// === Dọn trùng ===
 function _cleanupDuplicates() {
   const dups = _findDuplicates();
   if (dups.length === 0) {
     alert('✅ Không có bản ghi trùng lặp!');
     return;
   }
-
   const summary = { Giao: 0, Lấy: 0, Hoàn: 0 };
   dups.forEach(d => {
     const label = d.type === 'delivery' ? 'Giao' : d.type === 'pickup' ? 'Lấy' : 'Hoàn';
     summary[label]++;
   });
-
   let msg = `Tìm thấy ${dups.length} bản ghi trùng lặp:\n`;
   Object.keys(summary).forEach(k => {
     if (summary[k] > 0) msg += `• ${k}: ${summary[k]}\n`;
   });
   msg += '\nXóa hết các bản ghi trùng (giữ lại 1 bản gốc)?';
-
   if (!confirm(msg)) return;
-
   const idsByType = { delivery: [], pickup: [], return: [] };
   dups.forEach(d => idsByType[d.type].push(d.id));
-
   Object.keys(idsByType).forEach(type => {
     const ids = idsByType[type];
     state.appData[type] = state.appData[type].filter(r => !ids.includes(r.id));
   });
-
   updateAllViews();
   alert(`✅ Đã xóa ${dups.length} bản ghi trùng lặp!`);
+}
+
+// === Toggle ẩn/hiện khối Thu nhập ===
+function _toggleIncomeSection() {
+  const content = document.getElementById('incomeContent');
+  const icon = document.getElementById('incomeToggleIcon');
+  if (!content) return;
+  const isHidden = content.style.display === 'none' || content.style.display === '';
+  if (isHidden) {
+    content.style.display = 'block';
+    if (icon) icon.innerText = '▲';
+    localStorage.setItem('spx_income_open', '1');
+  } else {
+    content.style.display = 'none';
+    if (icon) icon.innerText = '▼';
+    localStorage.setItem('spx_income_open', '0');
+  }
+}
+
+function _initIncomeSection() {
+  const content = document.getElementById('incomeContent');
+  const icon = document.getElementById('incomeToggleIcon');
+  if (!content) return;
+  const isOpen = localStorage.getItem('spx_income_open') === '1';
+  if (isOpen) {
+    content.style.display = 'block';
+    if (icon) icon.innerText = '▲';
+  } else {
+    content.style.display = 'none';
+    if (icon) icon.innerText = '▼';
+  }
 }
 
 Object.assign(window, {
@@ -138,32 +163,30 @@ Object.assign(window, {
   saveManualPoints: _saveManualPoints,
   saveSalaryConfig: _saveSalaryConfig,
 
-  // Force save cấu hình
   forceSaveConfig: function() {
     const buuCuc = parseInt(document.getElementById('manualBuuCucInput').value, 10) || 0;
     const taiXe  = parseInt(document.getElementById('manualTaiXeInput').value, 10) || 0;
     const salary = parseFloat(document.getElementById('salaryBaseInput').value) || 0;
-
     state.manualPoints = { buuCuc, taiXe };
     state.manualSalary = salary;
     state.salaryDays = 26;
-
     localStorage.setItem('spx_manual_points', JSON.stringify(state.manualPoints));
     localStorage.setItem('spx_manual_salary', salary);
     localStorage.setItem('spx_salary_days', 26);
-
     clearTimeout(manualPointsTimer);
     clearTimeout(salaryTimer);
     updateAllViews();
-
     alert('✅ Đã lưu cấu hình!\n\n• Lương: ' + salary.toLocaleString('vi-VN') +
           '\n• Bưu cục: ' + buuCuc.toLocaleString('vi-VN') +
           '\n• Tài xế: ' + taiXe.toLocaleString('vi-VN'));
   },
 
-  // Dọn trùng lặp
   findDuplicates: _findDuplicates,
-  cleanupDuplicates: _cleanupDuplicates
+  cleanupDuplicates: _cleanupDuplicates,
+
+  // Toggle Thu nhập
+  toggleIncomeSection: _toggleIncomeSection,
+  initIncomeSection: _initIncomeSection
 });
 
 (function init() {
@@ -171,6 +194,7 @@ Object.assign(window, {
   initTheme();
   initRankUI();
   attachAutoClearInputs();
+  _initIncomeSection();
   updateAllViews();
   setTimeout(() => preloadTesseractWorker(), 2000);
 })();
