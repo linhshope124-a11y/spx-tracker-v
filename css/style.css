@@ -6,30 +6,25 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap');
 
 :root {
-  /* Backgrounds */
   --bg: #f8fafc;
   --surface: #ffffff;
   --surface-hover: #f9fafb;
   --surface-2: #f1f5f9;
   --surface-3: #e2e8f0;
 
-  /* Borders */
   --border: #e5e7eb;
   --border-strong: #d1d5db;
 
-  /* Text */
   --text-1: #0f172a;
   --text-2: #475569;
   --text-3: #94a3b8;
   --text-inverse: #ffffff;
 
-  /* Accent */
   --accent: #ff5722;
   --accent-hover: #ea4512;
   --accent-soft: #fff1eb;
   --accent-soft-border: #ffd5c2;
 
-  /* Semantic */
   --success: #10b981;
   --success-soft: #ecfdf5;
   --success-border: #a7f3d0;
@@ -43,7 +38,6 @@
   --info-soft: #eff6ff;
   --info-border: #bfdbfe;
 
-  /* Type colors */
   --giao: #8b5cf6;
   --giao-soft: #f5f3ff;
   --giao-border: #ddd6fe;
@@ -54,12 +48,10 @@
   --hoan-soft: #fffbeb;
   --hoan-border: #fde68a;
 
-  /* Radius */
   --r-sm: 8px;
   --r-md: 12px;
   --r-lg: 16px;
 
-  /* Shadows */
   --sh-xs: 0 1px 2px rgba(15, 23, 42, 0.04);
   --sh-sm: 0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
   --sh-md: 0 4px 12px rgba(15, 23, 42, 0.08);
@@ -189,10 +181,9 @@ body {
   transition: background 0.2s, color 0.2s;
 }
 
-/* Numbers use mono */
 .num, .order-num, .points-badge, .overview-hero-val, .stat-card-val,
 .overview-value, .batch-total, .phone-display,
-#overallTotalPoints, #incomeTotalDisplay, #incomePerDayText,
+#overallTotalPoints, #incomeTotalDisplay, #incomeTotalDisplayInner, #incomePerDayText,
 #miniDelPoints, #miniPickPoints, #miniRetPoints,
 #delTotalPoints, #pickTotalPoints, #retTotalPoints {
   font-feature-settings: "tnum";
@@ -508,7 +499,7 @@ body {
 .type-pick .stat-card-val { color: var(--lay); }
 .type-ret .stat-card-val { color: var(--hoan); }
 
-/* =============== OVERVIEW BOXES (tab-level) =============== */
+/* =============== OVERVIEW BOXES =============== */
 .overview-box {
   border-radius: var(--r-md);
   padding: 16px;
@@ -538,10 +529,16 @@ body {
   border: 1px solid var(--border);
   -webkit-overflow-scrolling: touch;
 }
-table { width: 100%; border-collapse: collapse; font-size: 12px; white-space: nowrap; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  white-space: nowrap;
+  table-layout: auto;
+}
 th {
   text-align: left;
-  padding: 10px 12px;
+  padding: 10px 8px;
   color: var(--text-3);
   font-size: 10px;
   font-weight: 600;
@@ -550,12 +547,13 @@ th {
   border-bottom: 1px solid var(--border);
   background: var(--surface-2);
 }
-th:last-child, td:last-child { text-align: right; }
+th:last-child, td:last-child { text-align: right; padding-right: 12px; }
 td {
-  padding: 12px;
+  padding: 12px 8px;
   border-bottom: 1px solid var(--border);
   color: var(--text-1);
   font-size: 12.5px;
+  vertical-align: middle;
 }
 tr:last-child td { border-bottom: none; }
 .weight-name { font-weight: 500; color: var(--text-2); }
@@ -564,8 +562,8 @@ tr:last-child td { border-bottom: none; }
 .order-num.pickup-num { color: var(--lay); }
 .order-num.return-num { color: var(--hoan); }
 .order-num.zero { color: var(--text-3); font-weight: 400; }
-.points-badge { font-weight: 600; color: var(--success); }
-.points-badge.zero { color: var(--text-3); font-weight: 400; }
+.points-badge { font-weight: 600; }
+.points-badge.zero { font-weight: 400; }
 
 .bar-container { height: 3px; background: var(--surface-3); border-radius: 4px; margin-top: 4px; overflow: hidden; }
 .bar-fill { height: 100%; border-radius: 4px; }
@@ -1083,10 +1081,36 @@ tr:last-child td { border-bottom: none; }
   to   { opacity: 1; transform: translateY(0); }
 }
 
-/* Override some inline styles từ index.html */
-.income-content > div[style*="border-bottom"] { border-bottom-color: var(--border) !important; }
-.income-content > div > div > span[style*="color:var(--text-primary)"] { color: var(--text-1) !important; }
-.income-content input { font-family: 'JetBrains Mono', 'SF Mono', monospace; }
+/* Details-based income section (native, không cần JS) */
+details.income-section {
+  padding: 0;
+  overflow: hidden;
+}
+details.income-section > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+details.income-section > summary::-webkit-details-marker { display: none; }
+details.income-section > summary::marker { display: none; content: ''; }
+.income-chevron {
+  display: inline-block;
+  font-size: 10px;
+  color: var(--text-3);
+  transition: transform 0.2s;
+}
+details.income-section[open] .income-chevron {
+  transform: rotate(180deg);
+}
+details.income-section > div {
+  padding: 0 16px 16px;
+}
 
 /* =============== UTIL =============== */
 .overview-sub-vnd { color: var(--accent); }
