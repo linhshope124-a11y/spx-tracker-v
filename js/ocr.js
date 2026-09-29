@@ -179,18 +179,13 @@ function detectActiveTabByOrangeLine(imageSource) {
 }
 
 // ==================== OCR ====================
-async function ocrRecognize(preprocessedDataUrl, psm) {
+async function ocrRecognize(preprocessedDataUrl) {
   const worker = await getTesseractWorker();
-  await worker.setParameters({
-    tessedit_pageseg_mode: psm,
-    preserve_interword_spaces: '1',
-    tessedit_do_invert: '0'
-  });
   const result = await worker.recognize(preprocessedDataUrl);
   return result.data.text || '';
 }
 
-// ==================== RANGE ====================
+// ==================== RANGE DEFS ====================
 const RANGE_DEFS = [
   { key: '0_2',     min: 0,  max: 2 },
   { key: '2_4',     min: 2,  max: 4 },
@@ -216,6 +211,7 @@ function parseOcrText(cleanText) {
   const confidences = {};
   const text = cleanText.replace(/[–—]/g, '-').replace(/,/g, '.');
 
+  // 1. Tổng đơn kỳ vọng
   const totalRegex = /T[oổ]ng\s*[:\-]?\s*(\d{1,6})/i;
   const totalMatch = text.match(totalRegex);
   let expectedTotal = totalMatch ? parseInt(totalMatch[1], 10) : null;
@@ -223,7 +219,7 @@ function parseOcrText(cleanText) {
   const totalPos = totalMatch ? totalMatch.index : -1;
   const totalEnd = totalMatch ? totalMatch.index + totalMatch[0].length : -1;
 
-  // Ranges
+  // 2. Ranges
   const rangeRegex = /(\d{1,2})(?:\.\d{1,3})?\s*-\s*(\d{1,2})(?:\.\d{1,3})?/g;
   const ranges = [];
   let m;
@@ -237,7 +233,7 @@ function parseOcrText(cleanText) {
   }
   ranges.sort((a, b) => a.pos - b.pos);
 
-  // Numbers
+  // 3. Numbers
   const numRegex = /\d{1,6}/g;
   const nums = [];
   while ((m = numRegex.exec(text)) !== null) {
@@ -252,13 +248,13 @@ function parseOcrText(cleanText) {
   }
   nums.sort((a, b) => a.pos - b.pos);
 
-  // Ordered match
+  // 4. Ordered match
   const orderedResult = {};
   for (let i = 0; i < ranges.length && i < nums.length; i++) {
     orderedResult[ranges[i].key] = nums[i].value;
   }
 
-  // Distance match
+  // 5. Distance match
   function distanceMatch(mode) {
     const result = {};
     const used = new Set();
@@ -322,6 +318,47 @@ function parseOcrText(cleanText) {
   return { weights, confidences, expectedTotal, totalFound, mode: bestMode };
 }
 
+// ==================== EXTRACT DATE — FIXED ====================
+function extractDate(text) {
+  const cleanText = text.replace(/,/g, '.');
+
+  // === Ưu tiên 1: DD/MM/YYYY (có năm rõ ràng) ===
+  const fullMatch = cleanText.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4}|\d{2})/);
+  if (fullMatch) {
+    const day = parseInt(fullMatch[1], 10);
+    const month = parseInt(fullMatch[2], 10);
+    let year = parseInt(fullMatch[3], 10);
+    if (year < 100) year += 2000;
+    if (day >= 1 && day <= 31 && month >= 1 && month <= 12 && year >= 2020 && year <= 2099) {
+      return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    }
+  }
+
+  // === Ưu tiên 2: "Ngày DD/MM" (có keyword "ngày") ===
+  const dayMatch = cleanText.match(/(?:ngày|ngay)\s*[-–:]?\s*(\d{1,2})[\/\-\.](\d{1,2})/i);
+  if (dayMatch) {
+    const day = parseInt(dayMatch[1], 10);
+    const month = parseInt(dayMatch[2], 10);
+    if (day >= 1 && day <= 31 && month >= 1 && month <= 12) {
+      return new Date().getFullYear() + '-' + String(month).padStart(2, '0') + '-' + String(day).padStart(2, '0');
+    }
+  }
+
+  // === Ưu tiên 3: DD/MM hợp lệ bất kỳ (validate day 1-31, month 1-12) ===
+  const allMatches = [...cleanText.matchAll(/(\d{1,2})[\/\-\.](\d{1,2})/g)];
+  for (const m of allMatches) {
+    const day = parseInt(m[1], 10);
+    const month = parseInt(m[2], 10);
+    // Loại số vô lý: ngày 1-31, tháng 1-12
+    if (day >= 1 && day <= 31 && month >= 1 && month <= 12) {
+      return new Date().getFullYear() + '-' + String(month).padStart(2, '0') + '-' + String(day).padStart(2, '0');
+    }
+  }
+
+  // === Fallback: hôm nay ===
+  return getTodayIso();
+}
+
 // ==================== CACHE ====================
 const ocrCache = new Map();
 const OCR_CACHE_MAX = 30;
@@ -352,7 +389,7 @@ function cacheSet(hash, value) {
   }
 }
 
-// ==================== BATCH ====================
+// ==================== BATCH STATE ====================
 let batchResults = [];
 let pendingAppend = false;
 
@@ -416,9 +453,11 @@ async function processFiles(files) {
       const rawDataUrl = await readFileAsDataURL(file);
       const hash   = await hashDataUrl(rawDataUrl);
       const cached = cacheGet(hash);
+
       if (cached) {
         statusDesc.innerText = '⚡ Dùng cache...';
-        out.push({ file: file.name, thumbnail: cached.thumbnail, result: cached.result, error: null, fromCache: true });
+        const cachedResult = { ...cached.result, fullDataUrl: rawDataUrl };
+        out.push({ file: file.name, thumbnail: cached.thumbnail, result: cachedResult, error: null, fromCache: true });
         continue;
       }
 
@@ -428,57 +467,41 @@ async function processFiles(files) {
       statusDesc.innerText = 'Xác định tab...';
       const detectedType = await detectActiveTabByOrangeLine(rawDataUrl);
 
-      // PASS 1: raw + upscale 2x + Otsu + SINGLE_BLOCK
+      // Pass 1
       statusDesc.innerText = 'Quét lần 1...';
       const pre1 = await preprocessImage(rawDataUrl, { upscale: 2.0, useOtsu: true });
-      const text1 = await ocrRecognize(pre1.dataUrl, Tesseract.PSM.SINGLE_BLOCK);
+      const text1 = await ocrRecognize(pre1.dataUrl);
       const parsed1 = parseOcrText(text1);
 
       let bestResult = parsed1;
       let bestText = text1;
       let bestDiff = parsed1.expectedTotal !== null ? Math.abs(parsed1.totalFound - parsed1.expectedTotal) : 9999;
-      let bestPsm = 'SINGLE_BLOCK';
 
-      // PASS 2: PSM.SPARSE_TEXT (chỉ khi pass 1 lệch)
+      // Pass 2
       if (bestDiff > 0) {
-        statusDesc.innerText = 'Quét lần 2 (layout)...';
-        const text2 = await ocrRecognize(pre1.dataUrl, Tesseract.PSM.SPARSE_TEXT);
+        statusDesc.innerText = 'Quét lần 2...';
+        const pre2 = await preprocessImage(rawDataUrl, { upscale: 2.0, useOtsu: false, threshold: 130 });
+        const text2 = await ocrRecognize(pre2.dataUrl);
         const parsed2 = parseOcrText(text2);
         const diff2 = parsed2.expectedTotal !== null ? Math.abs(parsed2.totalFound - parsed2.expectedTotal) : 9999;
         if (diff2 < bestDiff) {
           bestResult = parsed2;
           bestText = text2;
           bestDiff = diff2;
-          bestPsm = 'SPARSE_TEXT';
         }
       }
 
-      // PASS 3: threshold 130 (chỉ khi vẫn lệch)
+      // Pass 3
       if (bestDiff > 0) {
         statusDesc.innerText = 'Quét lần 3...';
-        const pre3 = await preprocessImage(rawDataUrl, { upscale: 2.0, useOtsu: false, threshold: 130 });
-        const text3 = await ocrRecognize(pre3.dataUrl, Tesseract.PSM.SINGLE_BLOCK);
+        const pre3 = await preprocessImage(rawDataUrl, { upscale: 2.5, useOtsu: false, threshold: 160 });
+        const text3 = await ocrRecognize(pre3.dataUrl);
         const parsed3 = parseOcrText(text3);
         const diff3 = parsed3.expectedTotal !== null ? Math.abs(parsed3.totalFound - parsed3.expectedTotal) : 9999;
         if (diff3 < bestDiff) {
           bestResult = parsed3;
           bestText = text3;
           bestDiff = diff3;
-          bestPsm = 'SINGLE_BLOCK+TH130';
-        }
-      }
-
-      // PASS 4: raw no binarize, PSM.AUTO
-      if (bestDiff > 0) {
-        statusDesc.innerText = 'Quét lần 4 (raw)...';
-        const text4 = await ocrRecognize(pre1.dataUrl.replace(/data:image\/png/, 'data:image/png'), Tesseract.PSM.AUTO);
-        const parsed4 = parseOcrText(text4);
-        const diff4 = parsed4.expectedTotal !== null ? Math.abs(parsed4.totalFound - parsed4.expectedTotal) : 9999;
-        if (diff4 < bestDiff) {
-          bestResult = parsed4;
-          bestText = text4;
-          bestDiff = diff4;
-          bestPsm = 'AUTO';
         }
       }
 
@@ -489,14 +512,11 @@ async function processFiles(files) {
         confidences: bestResult.confidences,
         expectedTotal: bestResult.expectedTotal,
         totalFound: bestResult.totalFound,
-        fullDataUrl: rawDataUrl,
-        debugText: bestText,
-        debugPsm: bestPsm,
-        debugMode: bestResult.mode
+        fullDataUrl: rawDataUrl
       };
 
       out.push({ file: file.name, thumbnail, result, error: null });
-      cacheSet(hash, { thumbnail, result: { ...result, fullDataUrl: '', debugText: '' } });
+      cacheSet(hash, { thumbnail, result: { ...result, fullDataUrl: '' } });
     } catch (err) {
       console.error('[OCR]', file.name, err);
       out.push({ file: file.name, thumbnail: '', result: null, error: err.message });
@@ -505,16 +525,7 @@ async function processFiles(files) {
   return out;
 }
 
-function extractDate(text) {
-  const cleanText = text.replace(/,/g, '.');
-  const dateMatch = cleanText.match(/(?:ngày|ngay)?\s*[-–:]?\s*(\d{1,2})[\/\-\.](\d{1,2})/i);
-  if (dateMatch) {
-    return new Date().getFullYear() + '-' + dateMatch[2].padStart(2, '0') + '-' + dateMatch[1].padStart(2, '0');
-  }
-  return getTodayIso();
-}
-
-// ==================== FILL MODAL + DEBUG ====================
+// ==================== FILL MODAL ====================
 export function fillModalFromResult(batchItem) {
   const r = batchItem.result;
   state.lastOcrImageDataUrl = r.fullDataUrl || '';
@@ -556,16 +567,9 @@ export function fillModalFromResult(batchItem) {
   else if (midCount > 0)  confMsg = '\n\n🟡 ' + midCount + ' dải nên xem lại (viền vàng)';
   else if (highCount > 0) confMsg = '\n\n🟢 ' + highCount + ' dải đọc chắc chắn';
 
-  // DEBUG — hiển thị raw text OCR khi lệch
-  let debugMsg = '';
-  if (warnMsg && r.debugText) {
-    const clean = r.debugText.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 300);
-    debugMsg = '\n\n🔍 [DEBUG] PSM=' + (r.debugPsm || '?') + ' · Mode=' + (r.debugMode || '?') + '\n📄 Text thô:\n' + clean;
-  }
-
   alert('✅ Quét xong!\n- Tab: ' + typeText
       + '\n- Ngày: ' + formatDateDisplay(r.parsedDate)
-      + '\n- Tổng: ' + r.totalFound + ' đơn' + warnMsg + confMsg + debugMsg
+      + '\n- Tổng: ' + r.totalFound + ' đơn' + warnMsg + confMsg
       + '\n\n📷 Kéo xuống xem ẢNH GỐC để đối chiếu.');
 }
 
@@ -637,7 +641,7 @@ function renderBatchList() {
   list.innerHTML = '';
   document.getElementById('batchCount').innerText = batchResults.length;
   if (batchResults.length === 0) {
-    list.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-muted);font-size:12px">Không có ảnh nào.</div>';
+    list.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-3);font-size:12px">Không có ảnh nào.</div>';
     return;
   }
   const typeMap = { del: ['Giao', 'tag-delivery'], pick: ['Lấy', 'tag-pickup'], ret: ['Hoàn', 'tag-return'] };
@@ -649,10 +653,10 @@ function renderBatchList() {
         <div class="batch-thumb" style="display:flex;align-items:center;justify-content:center;font-size:22px">⚠️</div>
         <div class="batch-info">
           <div class="batch-title">${escapeHtml(item.file)}</div>
-          <div class="batch-meta" style="color:var(--glass-rose-text)">Lỗi: ${escapeHtml(item.error)}</div>
+          <div class="batch-meta" style="color:var(--danger)">Lỗi: ${escapeHtml(item.error)}</div>
         </div>
         <div class="batch-actions">
-          <button class="batch-btn batch-btn-remove" onclick="removeBatchItem(${idx})">✕ Bỏ</button>
+          <button class="batch-btn batch-btn-remove" onclick="removeBatchItem(${idx})">Bỏ</button>
         </div>`;
     } else {
       const r = item.result;
@@ -672,7 +676,7 @@ function renderBatchList() {
         ? `<button class="batch-btn batch-btn-compare" onclick="importBatchItem(${idx})">🔍 So sánh</button>`
         : `<button class="batch-btn batch-btn-import" onclick="importBatchItem(${idx})">📝 Nhập</button>`;
       const existingBadge = existing
-        ? ` <span style="font-size:9px;padding:1px 5px;border-radius:4px;background:var(--glass-amber);border:1px solid var(--glass-amber-border);color:var(--glass-amber-text);font-weight:700">Đã có</span>`
+        ? ` <span style="font-size:9px;padding:1px 6px;border-radius:4px;background:var(--warning-soft);border:1px solid var(--warning-border);color:var(--warning);font-weight:700">Đã có</span>`
         : '';
       div.className = 'batch-item';
       div.innerHTML = `
@@ -687,7 +691,7 @@ function renderBatchList() {
         </div>
         <div class="batch-actions">
           ${actionBtn}
-          <button class="batch-btn batch-btn-remove" onclick="removeBatchItem(${idx})">✕ Bỏ</button>
+          <button class="batch-btn batch-btn-remove" onclick="removeBatchItem(${idx})">Bỏ</button>
         </div>`;
     }
     list.appendChild(div);
@@ -804,6 +808,7 @@ function escapeHtml(s) {
   }[c]));
 }
 
+// ==================== HIGHLIGHT ====================
 export function applyConfidenceHighlight(confMap, detectedType) {
   const prefix = detectedType === 'del' ? 'del_inp'
                : detectedType === 'pick' ? 'pick_inp' : 'ret_inp';
@@ -845,6 +850,7 @@ export function clearAllConfidenceHighlights() {
   }));
 }
 
+// ==================== LIGHTBOX ====================
 export function openOcrLightbox() {
   const src = document.getElementById('ocrPreviewImg').src;
   if (!src) return;
