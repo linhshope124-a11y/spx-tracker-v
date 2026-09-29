@@ -5,16 +5,28 @@ import { formatPts, formatDateDisplay, _fmt } from './utils.js';
 
 const NEED_HIGHLIGHT = 'color:#dc2626;font-size:1.35em;font-weight:900;letter-spacing:0.5px;';
 
-// Đếm số ngày có record trong THÁNG HIỆN TẠI
-function getWorkedDaysThisMonth() {
+// Đếm số ngày công theo kỳ đang chọn
+function getWorkedDaysByPeriod(period) {
   const now = new Date();
   const cy = now.getFullYear();
   const cm = now.getMonth() + 1;
+  let ly = cy, lm = cm - 1;
+  if (lm === 0) { lm = 12; ly--; }
+
+  const todayIso = `${cy}-${String(cm).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   const dates = new Set();
+
   ['delivery', 'pickup', 'return'].forEach(type => {
     state.appData[type].forEach(r => {
       const [ry, rm] = r.date.split('-').map(Number);
-      if (ry === cy && rm === cm) dates.add(r.date);
+      if (period === 'today') {
+        if (r.date === todayIso) dates.add(r.date);
+      } else if (period === 'last_month') {
+        if (ry === ly && rm === lm) dates.add(r.date);
+      } else {
+        // 'all' và 'this_month' đều tính tháng hiện tại
+        if (ry === cy && rm === cm) dates.add(r.date);
+      }
     });
   });
   return dates.size;
@@ -96,10 +108,10 @@ function _updateAllViews() {
   const rawBase   = delPts + pickPts + retPts;
   const rankBonus = Math.round(rawBase * state.rankBonus);
 
-  // === Ngày công ===
-  const salaryDays    = 26;
-  const workedDays    = getWorkedDaysThisMonth();
-  const effectiveDays = Math.min(workedDays, salaryDays);
+  // === Ngày công theo kỳ ===
+  const salaryDays = 26;
+  const workedDays = getWorkedDaysByPeriod(state.periodFilter);
+  const displayDays = workedDays === 0 ? salaryDays : Math.min(workedDays, salaryDays);
 
   // === Lương tổng tháng ===
   const salaryBase   = state.manualSalary || 0;
@@ -107,11 +119,9 @@ function _updateAllViews() {
   const manualTaiXe  = state.manualPoints?.taiXe  || 0;
   const monthlyTotal = salaryBase + manualBuuCuc + manualTaiXe;
 
-  // === Lương 1 ngày = tổng tháng / 26 ===
-  const perDay = monthlyTotal / salaryDays;
-
-  // === Tích lũy = số ngày × lương/ngày ===
-  const incomeAccumulated = Math.round(perDay * effectiveDays);
+  // === Lương 1 ngày ===
+  const perDay = salaryDays > 0 ? monthlyTotal / salaryDays : 0;
+  const incomeAccumulated = Math.round(perDay * displayDays);
 
   const finalTotal  = rawBase + rankBonus + incomeAccumulated;
   const totalOrders = total.del + total.pick + total.ret;
@@ -170,14 +180,43 @@ function _updateAllViews() {
   const incomeDayCount = document.getElementById('incomeDayCount');
   const incomePerDay   = document.getElementById('incomePerDayText');
   const incomeTotal    = document.getElementById('incomeTotalDisplay');
+  const incomeLabelEl  = document.getElementById('incomePeriodLabel');
 
   if (salaryBaseEl && document.activeElement !== salaryBaseEl) salaryBaseEl.value = salaryBase;
   if (buuCucInput && document.activeElement !== buuCucInput)   buuCucInput.value  = manualBuuCuc;
   if (taiXeInput  && document.activeElement !== taiXeInput)    taiXeInput.value   = manualTaiXe;
 
-  if (incomeDayCount) incomeDayCount.innerText = `${workedDays}/${salaryDays} ngày`;
+  if (incomeDayCount) incomeDayCount.innerText = `${displayDays}/${salaryDays} ngày`;
   if (incomePerDay)   incomePerDay.innerText   = formatPts(Math.round(perDay)) + '/ngày';
   if (incomeTotal)    incomeTotal.innerText    = '+' + formatPts(incomeAccumulated);
+
+  // Label kỳ đang xem
+  if (incomeLabelEl) {
+    const map = {
+      'all':         '(tháng này)',
+      'this_month':  '(tháng này)',
+      'last_month':  '(tháng trước)',
+      'today':       '(hôm nay)'
+    };
+    incomeLabelEl.innerText = map[state.periodFilter] || '(tháng này)';
+  }
+
+  // Cảnh báo chưa nhập ngày công tháng này
+  const incomeBox = document.getElementById('incomeContent');
+  if (incomeBox) {
+    let warnEl = incomeBox.querySelector('.income-warning');
+    if (workedDays === 0 && state.periodFilter === 'this_month') {
+      if (!warnEl) {
+        warnEl = document.createElement('div');
+        warnEl.className = 'income-warning';
+        warnEl.style.cssText = 'font-size:10px;color:var(--glass-amber-text);margin-top:8px;text-align:center;padding:6px;background:var(--glass-amber);border-radius:8px;border:1px solid var(--glass-amber-border)';
+        warnEl.innerText = '⚠️ Chưa nhập ngày công tháng này — đang tạm tính 26/26 ngày';
+        incomeBox.appendChild(warnEl);
+      }
+    } else if (warnEl) {
+      warnEl.remove();
+    }
+  }
 
   const filteredCount =
     state.appData.delivery.filter(r => isDateInCurrentPeriod(r.date, state.periodFilter)).length +
