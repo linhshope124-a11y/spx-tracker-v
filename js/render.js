@@ -33,10 +33,14 @@ function getWorkedDaysByPeriod(period) {
 }
 
 function renderRow(weightLabel, orders, tier, typeClass) {
+  const ptsText = tier.matched.pt === 0
+    ? '<span style="color:var(--text-3);font-weight:400">—</span>'
+    : `<span style="color:var(--accent);font-weight:700">${_fmt(tier.matched.pt)}</span><span style="font-size:9px;color:var(--text-3);margin-left:1px;font-weight:500">đ</span>`;
+
   return `<td class="weight-name">${weightLabel}</td>
     <td class="order-num ${typeClass} ${orders === 0 ? 'zero' : ''}">${_fmt(orders)}<div class="bar-container"><div class="bar-fill ${typeClass.replace('-num','')}" style="width:${tier.pct}%"></div></div></td>
-    <td style="color:var(--text-muted);font-size:10.5px">${tier.matched.range}</td>
-    <td class="points-badge ${orders === 0 ? 'zero' : ''}">${formatPts(tier.matched.pt)}</td>`;
+    <td style="color:var(--text-3);font-size:11px">${tier.matched.range}</td>
+    <td class="points-badge ${orders === 0 ? 'zero' : ''}">${ptsText}</td>`;
 }
 
 function buildSuggestion(label, orders, tier) {
@@ -180,6 +184,7 @@ function _updateAllViews() {
   const incomeDayCount = document.getElementById('incomeDayCount');
   const incomePerDay   = document.getElementById('incomePerDayText');
   const incomeTotal    = document.getElementById('incomeTotalDisplay');
+  const incomeTotalInner = document.getElementById('incomeTotalDisplayInner');
   const incomeLabelEl  = document.getElementById('incomePeriodLabel');
 
   if (salaryBaseEl && document.activeElement !== salaryBaseEl) salaryBaseEl.value = salaryBase;
@@ -189,6 +194,7 @@ function _updateAllViews() {
   if (incomeDayCount) incomeDayCount.innerText = `${displayDays}/${salaryDays} ngày`;
   if (incomePerDay)   incomePerDay.innerText   = formatPts(Math.round(perDay)) + '/ngày';
   if (incomeTotal)    incomeTotal.innerText    = '+' + formatPts(incomeAccumulated);
+  if (incomeTotalInner) incomeTotalInner.innerText = '+' + formatPts(incomeAccumulated);
 
   // Label kỳ đang xem
   if (incomeLabelEl) {
@@ -202,15 +208,15 @@ function _updateAllViews() {
   }
 
   // Cảnh báo chưa nhập ngày công tháng này
-  const incomeBox = document.getElementById('incomeContent');
+  const incomeBox = document.getElementById('incomeContent') || document.getElementById('incomeDetails');
   if (incomeBox) {
     let warnEl = incomeBox.querySelector('.income-warning');
     if (workedDays === 0 && state.periodFilter === 'this_month') {
       if (!warnEl) {
         warnEl = document.createElement('div');
         warnEl.className = 'income-warning';
-        warnEl.style.cssText = 'font-size:10px;color:var(--glass-amber-text);margin-top:8px;text-align:center;padding:6px;background:var(--glass-amber);border-radius:8px;border:1px solid var(--glass-amber-border)';
-        warnEl.innerText = '⚠️ Chưa nhập ngày công tháng này — đang tạm tính 26/26 ngày';
+        warnEl.style.cssText = 'font-size:10.5px;color:var(--warning);margin-top:10px;text-align:center;padding:8px;background:var(--warning-soft);border-radius:8px;border:1px solid var(--warning-border);font-weight:500';
+        warnEl.innerText = 'Chưa nhập ngày công tháng này — đang tạm tính 26/26 ngày';
         incomeBox.appendChild(warnEl);
       }
     } else if (warnEl) {
@@ -279,8 +285,8 @@ export function renderHistory() {
       <div class="hist-meta"><span class="hist-badge-tag ${tagClass}">${tagText}</span>${formatDateDisplay(r.date)} · <span>${_fmt(dayTotal)} đơn</span></div>
       <div class="hist-detail">${parts.join(' • ') || '0 đơn'}</div></div>
       <div class="hist-actions">
-        <button class="hist-btn hist-edit-btn" onclick="openEditModal('${r.type}', ${r.id})">✏ Sửa</button>
-        <button class="hist-btn hist-del-btn" onclick="deleteRecord('${r.type}', ${r.id})">✕ Xóa</button>
+        <button class="hist-btn hist-edit-btn" onclick="openEditModal('${r.type}', ${r.id})">Sửa</button>
+        <button class="hist-btn hist-del-btn" onclick="deleteRecord('${r.type}', ${r.id})">Xóa</button>
       </div>`;
     container.appendChild(div);
   });
