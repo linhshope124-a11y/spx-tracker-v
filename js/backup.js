@@ -1,5 +1,5 @@
 import { state } from './state.js';
-import { APP_VERSION, STORAGE_KEYS } from './config.js';
+import { APP_VERSION, STORAGE_KEYS, WEIGHT_KEYS } from './config.js';
 import { getTodayIso } from './utils.js';
 import { updateAllViews } from './render.js';
 import { initRankUI } from './ui.js';
@@ -31,18 +31,46 @@ export function openPasteJsonModal()  {
 }
 export function closePasteJsonModal() { document.getElementById('pasteJsonModal').classList.remove('active'); }
 
+function weightsEqual(a, b) {
+  return WEIGHT_KEYS.every(k => (parseInt(a[k], 10) || 0) === (parseInt(b[k], 10) || 0));
+}
+
+// Dọn trùng lặp trong 1 mảng records
+function dedupeList(list) {
+  const seen = new Set();
+  return list.filter(r => {
+    const key = r.date + '|' + WEIGHT_KEYS.map(k => parseInt(r.weights?.[k], 10) || 0).join('_');
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function applyImportedPayload(parsed) {
   let importedData = null, importedSettings = null;
   if (parsed?.data && (parsed.data.delivery || parsed.data.pickup || parsed.data.return)) {
     importedData = parsed.data; importedSettings = parsed.settings || null;
   } else if (parsed && (parsed.delivery || parsed.pickup || parsed.return)) {
     importedData = parsed;
-  } else return false;
+  } else return { success: false };
+
+  // DỌN TRÙNG LẶP tự động khi import
+  const originalDel  = importedData.delivery || [];
+  const originalPick = importedData.pickup   || [];
+  const originalRet  = importedData.return   || [];
+
+  const dedupedDel  = dedupeList(originalDel);
+  const dedupedPick = dedupeList(originalPick);
+  const dedupedRet  = dedupeList(originalRet);
+
+  const removedCount = (originalDel.length  - dedupedDel.length)
+                     + (originalPick.length - dedupedPick.length)
+                     + (originalRet.length  - dedupedRet.length);
 
   state.appData = {
-    delivery: importedData.delivery || [],
-    pickup:   importedData.pickup   || [],
-    return:   importedData.return   || []
+    delivery: dedupedDel,
+    pickup:   dedupedPick,
+    return:   dedupedRet
   };
 
   localStorage.setItem(STORAGE_KEYS.records, JSON.stringify(state.appData));
@@ -63,9 +91,25 @@ function applyImportedPayload(parsed) {
       const icon = document.getElementById('themeIcon');
       if (icon) icon.innerText = importedSettings.theme === 'dark' ? '☀️' : '🌙';
     }
+    if (importedSettings.manualPoints) {
+      state.manualPoints = {
+        buuCuc: importedSettings.manualPoints.buuCuc || 0,
+        taiXe:  importedSettings.manualPoints.taiXe  || 0
+      };
+      localStorage.setItem('spx_manual_points', JSON.stringify(state.manualPoints));
+    }
+    if (Number.isFinite(importedSettings.manualSalary)) {
+      state.manualSalary = importedSettings.manualSalary;
+      localStorage.setItem('spx_manual_salary', state.manualSalary);
+    }
+    if (Number.isFinite(importedSettings.salaryDays)) {
+      state.salaryDays = importedSettings.salaryDays;
+      localStorage.setItem('spx_salary_days', state.salaryDays);
+    }
     initRankUI();
   }
-  return true;
+
+  return { success: true, removedCount };
 }
 
 export function confirmImportJsonString() {
@@ -73,10 +117,15 @@ export function confirmImportJsonString() {
   if (!text) { alert('Vui lòng dán chuỗi JSON!'); return; }
   try {
     const parsed = JSON.parse(text);
-    if (applyImportedPayload(parsed)) {
+    const result = applyImportedPayload(parsed);
+    if (result.success) {
       updateAllViews();
       closePasteJsonModal();
-      alert('Khôi phục dữ liệu thành công!');
+      let msg = '✅ Khôi phục dữ liệu thành công!';
+      if (result.removedCount > 0) {
+        msg += `\n\n🧹 Đã tự động bỏ qua ${result.removedCount} bản ghi trùng lặp.`;
+      }
+      alert(msg);
     } else alert('Chuỗi JSON không đúng định dạng!');
   } catch { alert('Dữ liệu JSON không hợp lệ!'); }
 }
@@ -109,9 +158,14 @@ export function importData(event) {
   reader.onload = e => {
     try {
       const parsed = JSON.parse(e.target.result);
-      if (applyImportedPayload(parsed)) {
+      const result = applyImportedPayload(parsed);
+      if (result.success) {
         updateAllViews();
-        alert('Khôi phục dữ liệu thành công!');
+        let msg = '✅ Khôi phục dữ liệu thành công!';
+        if (result.removedCount > 0) {
+          msg += `\n\n🧹 Đã tự động bỏ qua ${result.removedCount} bản ghi trùng lặp.`;
+        }
+        alert(msg);
       } else alert('File sao lưu không đúng định dạng!');
     } catch { alert('Không đọc được file sao lưu!'); }
   };
