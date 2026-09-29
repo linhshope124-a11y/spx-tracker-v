@@ -19,7 +19,7 @@ function weightsEqual(a, b) {
 }
 
 function findDuplicate(type, date, weights) {
-  return state.appData[type].some(r => r.date === date && weightsEqual(r.weights, weights));
+  return state.appData[type].find(r => r.date === date && weightsEqual(r.weights, weights));
 }
 
 export function saveRecord() {
@@ -32,6 +32,7 @@ export function saveRecord() {
   const wasFromBatch = hasBatchPending();
 
   if (editId && editType) {
+    // === SỬA BẢN GHI ===
     const numId  = parseInt(editId, 10);
     const prefix = editType === 'delivery' ? 'del_inp'
                  : editType === 'pickup'   ? 'pick_inp'
@@ -41,6 +42,16 @@ export function saveRecord() {
     if (idx === -1) {
       alert('Không tìm thấy bản ghi để cập nhật.');
       closeModal(true); updateAllViews(); return;
+    }
+
+    // Check trùng (trừ chính nó)
+    const dup = state.appData[editType].find(r =>
+      r.id !== numId && r.date === date && weightsEqual(r.weights, weights)
+    );
+    if (dup) {
+      const typeLabel = editType === 'delivery' ? 'Giao' : editType === 'pickup' ? 'Lấy' : 'Hoàn';
+      alert(`🚫 Không thể lưu!\n\nBản ghi ${typeLabel} ngày ${formatDateDisplay(date)} đã tồn tại với CÙNG số liệu.\n\nHãy sửa số liệu khác hoặc xóa bản ghi cũ trước.`);
+      return;
     }
 
     const oldRecord = deepClone(state.appData[editType][idx]);
@@ -55,6 +66,7 @@ export function saveRecord() {
       }
     });
   } else {
+    // === THÊM MỚI ===
     const delW  = parseWeights('del_inp');
     const pickW = parseWeights('pick_inp');
     const retW  = parseWeights('ret_inp');
@@ -63,14 +75,15 @@ export function saveRecord() {
     const retT  = Object.values(retW).reduce((a, b) => a + b, 0);
     if (delT + pickT + retT === 0) { alert('Chưa nhập số liệu nào!'); return; }
 
+    // CHẶN LUÔN nếu trùng
     const dups = [];
     if (delT  > 0 && findDuplicate('delivery', date, delW))  dups.push('Giao');
     if (pickT > 0 && findDuplicate('pickup',   date, pickW)) dups.push('Lấy');
     if (retT  > 0 && findDuplicate('return',   date, retW))  dups.push('Hoàn');
 
     if (dups.length > 0) {
-      const msg = `⚠️ Dữ liệu đã tồn tại cho ngày ${formatDateDisplay(date)}:\n- ${dups.join(', ')}\n\nBạn vẫn muốn LƯU THÊM (tạo bản ghi trùng)?`;
-      if (!confirm(msg)) return;
+      alert(`🚫 Không thể lưu!\n\nNgày ${formatDateDisplay(date)} đã tồn tại bản ghi ${dups.join(', ')} với CÙNG số liệu.\n\nHãy:\n• Sửa số liệu khác\n• Hoặc xóa bản ghi cũ trước`);
+      return;
     }
 
     const addedIds = [];
