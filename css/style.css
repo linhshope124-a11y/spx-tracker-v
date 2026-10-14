@@ -1114,3 +1114,631 @@ details.income-section > div {
 
 /* =============== UTIL =============== */
 .overview-sub-vnd { color: var(--accent); }
+/* =============================================================
+   FEE TABLE MODAL — Bảng phí dịch vụ (append cuối file)
+   - Nút ⓘ cạnh "Cơ hội tăng điểm"
+   - Modal 2 mode: Bảng đầy đủ / Tra cứu
+   - Slider nonlinear + adjust buttons
+   - Sticky header + sticky first col
+   ============================================================= */
+
+/* ============ NÚT ⓘ CẠNH TITLE "CƠ HỘI TĂNG ĐIỂM" ============ */
+.fee-info-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  padding: 0;
+  margin-left: 6px;
+  border-radius: 50%;
+  transition: all 0.15s;
+  vertical-align: middle;
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+.fee-info-btn svg { width: 14px; height: 14px; }
+.fee-info-btn:hover {
+  color: var(--accent);
+  opacity: 1;
+  background: var(--accent-soft);
+}
+.fee-info-btn:active { transform: scale(0.9); }
+
+/* ============ MODAL OVERLAY (riêng cho fee-table) ============ */
+.fee-table-modal {
+  align-items: flex-end !important;
+  z-index: 120;
+}
+.fee-table-modal-box {
+  max-width: 620px !important;
+  width: 100%;
+  max-height: 92vh;
+  border-radius: 20px 20px 0 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0 !important;
+}
+
+/* ============ HEADER ============ */
+.fee-table-header {
+  padding: 14px 18px !important;
+  border-bottom: 1px solid var(--border) !important;
+  flex-shrink: 0;
+}
+.fee-table-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+.fee-table-title-ico {
+  font-size: 20px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.fee-table-header h3 {
+  font-size: 15px !important;
+  font-weight: 800 !important;
+  letter-spacing: -0.015em;
+  margin: 0 !important;
+}
+
+/* ============ MODE SWITCH (Bảng đầy đủ / Tra cứu) ============ */
+.fee-mode-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  padding: 12px 18px 8px;
+  background: var(--surface);
+  flex-shrink: 0;
+}
+.fee-mode-btn {
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  font-family: inherit;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-2);
+  cursor: pointer;
+  transition: all 0.15s;
+  letter-spacing: -0.005em;
+  white-space: nowrap;
+}
+.fee-mode-btn:active { transform: scale(0.97); }
+.fee-mode-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(255,87,34,0.28);
+}
+
+/* ============ TYPE TABS (Giao / Lấy / Hoàn) ============ */
+.fee-type-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  padding: 4px 18px 12px;
+  background: var(--surface);
+  flex-shrink: 0;
+}
+.fee-type-btn {
+  padding: 9px 8px;
+  font-size: 12.5px;
+  font-weight: 700;
+  font-family: inherit;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-3);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.fee-type-btn:active { transform: scale(0.97); }
+.fee-type-btn.del.active  {
+  background: var(--giao-soft);
+  border-color: var(--giao-bd);
+  color: var(--giao);
+}
+.fee-type-btn.pick.active {
+  background: var(--lay-soft);
+  border-color: var(--lay-bd);
+  color: var(--lay);
+}
+.fee-type-btn.ret.active  {
+  background: var(--hoan-soft);
+  border-color: var(--hoan-bd);
+  color: var(--hoan);
+}
+
+/* ============ PANELS ============ */
+.fee-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--surface);
+}
+.fee-panel-table {
+  padding: 0 0 8px;
+}
+
+/* ============ SEARCH BOX ============ */
+.fee-search-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 18px 10px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  flex-shrink: 0;
+}
+.fee-search-wrap:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.fee-search-ico {
+  font-size: 14px;
+  flex-shrink: 0;
+  line-height: 1;
+}
+.fee-search-input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  outline: none;
+  color: var(--text-1);
+  font-size: 14px;
+  font-family: inherit;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  padding: 0;
+  min-width: 0;
+}
+.fee-search-input::placeholder {
+  color: var(--text-3);
+  font-weight: 400;
+}
+.fee-search-clear {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: none;
+  background: var(--border);
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+.fee-search-clear:active { transform: scale(0.9); }
+
+/* ============ TABLE SCROLL + STICKY ============ */
+.fee-table-scroll {
+  flex: 1;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: 0 18px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  position: relative;
+}
+
+.fee-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 11.5px;
+  min-width: 620px;
+}
+
+.fee-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--surface-2);
+  color: var(--text-3);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  padding: 10px 8px;
+  text-align: right;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.fee-table thead th:first-child {
+  text-align: left;
+  padding-left: 14px;
+  left: 0;
+  z-index: 4;
+  min-width: 80px;
+}
+
+.fee-table tbody td {
+  padding: 8px;
+  text-align: right;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-2);
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  background: var(--surface);
+}
+.fee-table tbody td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  text-align: left;
+  padding-left: 14px;
+  color: var(--text-1);
+  font-weight: 700;
+  background: var(--surface);
+  box-shadow: 1px 0 0 var(--border);
+}
+.fee-table tbody tr:last-child td {
+  border-bottom: none;
+}
+.fee-table tbody tr:hover td {
+  background: var(--surface-2);
+}
+
+/* Highlight row match search */
+.fee-table tbody tr.fee-row-match td {
+  background: #fffbeb !important;
+  border-top: 1px solid var(--warning);
+  border-bottom: 1px solid var(--warning);
+}
+[data-theme="dark"] .fee-table tbody tr.fee-row-match td {
+  background: rgba(210,153,34,0.14) !important;
+}
+.fee-table tbody tr.fee-row-match td:first-child {
+  border-left: 3px solid var(--warning);
+  padding-left: 11px;
+}
+
+/* ============ MODE CALC — SỐ ĐƠN HIỂN THỊ LỚN ============ */
+.fee-panel-calc {
+  padding: 4px 18px 18px;
+  overflow-y: auto;
+}
+
+.fee-calc-display-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 14px 16px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  margin-bottom: 18px;
+  transition: border-color 0.15s;
+}
+.fee-calc-display-wrap:focus-within {
+  border-color: var(--accent);
+}
+.fee-calc-display-lbl {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+.fee-calc-display-input {
+  width: 100%;
+  border: none;
+  background: transparent;
+  outline: none;
+  color: var(--accent);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 32px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  text-align: center;
+  padding: 0;
+  line-height: 1.1;
+  -moz-appearance: textfield;
+}
+.fee-calc-display-input::-webkit-outer-spin-button,
+.fee-calc-display-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* ============ SLIDER ============ */
+.fee-slider-wrap {
+  margin-bottom: 16px;
+  padding: 0 4px;
+}
+.fee-slider {
+  width: 100%;
+  height: 8px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: var(--surface-2);
+  border-radius: 999px;
+  outline: none;
+  display: block;
+  margin: 12px 0 8px;
+  cursor: pointer;
+}
+.fee-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 3px solid var(--surface);
+  box-shadow: 0 2px 8px rgba(255,87,34,0.35);
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+.fee-slider::-webkit-slider-thumb:active {
+  transform: scale(1.15);
+}
+.fee-slider::-moz-range-thumb {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 3px solid var(--surface);
+  box-shadow: 0 2px 8px rgba(255,87,34,0.35);
+  cursor: pointer;
+}
+
+.fee-slider-ticks {
+  display: flex;
+  justify-content: space-between;
+  padding: 0 2px;
+  margin-top: 6px;
+}
+.fee-tick {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-3);
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: -0.02em;
+  transition: color 0.15s;
+}
+
+/* ============ ADJUST ROW (5 nút) ============ */
+.fee-adjust-row {
+  display: grid;
+  grid-template-columns: 1fr 0.8fr 1.2fr 0.8fr 1fr;
+  gap: 6px;
+  margin-bottom: 18px;
+}
+.fee-adj-btn {
+  height: 44px;
+  padding: 0 6px;
+  font-size: 13px;
+  font-weight: 800;
+  font-family: 'JetBrains Mono', monospace;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-1);
+  cursor: pointer;
+  transition: all 0.1s;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.fee-adj-btn:active {
+  transform: scale(0.95);
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+.fee-adj-btn.fee-adj-big {
+  font-size: 12.5px;
+}
+
+.fee-adj-input {
+  height: 44px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+  color: var(--accent);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 15px;
+  font-weight: 800;
+  text-align: center;
+  outline: none;
+  letter-spacing: -0.02em;
+  width: 100%;
+  -moz-appearance: textfield;
+  transition: box-shadow 0.15s;
+}
+.fee-adj-input::-webkit-outer-spin-button,
+.fee-adj-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.fee-adj-input:focus {
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* ============ KẾT QUẢ ============ */
+.fee-result {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  background: var(--surface-2);
+  display: none;
+}
+.fee-result.fee-result-show {
+  display: block;
+  animation: feeResultFade 0.2s ease-out;
+}
+@keyframes feeResultFade {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.fee-result-head {
+  font-size: 12.5px;
+  font-weight: 800;
+  color: var(--text-1);
+  letter-spacing: -0.01em;
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.fee-result-head b {
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.fee-result-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+.fee-result-row:last-of-type {
+  border-bottom: none;
+}
+.fee-result-lbl {
+  font-size: 12px;
+  color: var(--text-2);
+  font-weight: 600;
+}
+.fee-result-val {
+  font-size: 13px;
+  color: var(--accent);
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+.fee-result-total {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 2px solid var(--border-2);
+}
+.fee-result-total-lbl {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--text-1);
+  letter-spacing: -0.01em;
+}
+.fee-result-total-val {
+  font-size: 15px;
+  color: var(--accent);
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 800;
+  letter-spacing: -0.025em;
+}
+
+/* ============ EMPTY STATE ============ */
+.fee-empty {
+  display: none;
+  text-align: center;
+  padding: 24px 16px;
+  color: var(--text-3);
+}
+.fee-empty.fee-empty-show {
+  display: block;
+}
+.fee-empty-ico {
+  font-size: 40px;
+  line-height: 1;
+  margin-bottom: 10px;
+  opacity: 0.6;
+}
+.fee-empty-txt {
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.55;
+}
+
+/* ============ RESPONSIVE ============ */
+@media (max-width: 400px) {
+  .fee-table-modal-box {
+    max-height: 94vh;
+  }
+  .fee-mode-switch {
+    padding: 10px 14px 6px;
+  }
+  .fee-mode-btn {
+    font-size: 12px;
+    padding: 9px 8px;
+  }
+  .fee-type-tabs {
+    padding: 4px 14px 10px;
+  }
+  .fee-type-btn {
+    font-size: 12px;
+    padding: 8px 6px;
+  }
+  .fee-search-wrap {
+    margin: 0 14px 8px;
+    padding: 9px 11px;
+  }
+  .fee-table-scroll {
+    margin: 0 14px;
+  }
+  .fee-panel-calc {
+    padding: 4px 14px 14px;
+  }
+  .fee-calc-display-input {
+    font-size: 28px;
+  }
+  .fee-adj-btn.fee-adj-big {
+    font-size: 11.5px;
+    padding: 0 4px;
+  }
+  .fee-adj-input {
+    font-size: 14px;
+  }
+}
+
+@media (min-width: 640px) {
+  .fee-table-modal-box {
+    border-radius: 20px;
+    margin-bottom: 20px;
+  }
+}
+
+/* ============ REDUCED MOTION ============ */
+@media (prefers-reduced-motion: reduce) {
+  .fee-result.fee-result-show { animation: none !important; }
+  .fee-slider::-webkit-slider-thumb { transition: none !important; }
+  .fee-slider::-webkit-slider-thumb:active { transform: none !important; }
+  .fee-mode-btn,
+  .fee-type-btn,
+  .fee-adj-btn,
+  .fee-info-btn,
+  .fee-search-clear { transition: none !important; }
+}
