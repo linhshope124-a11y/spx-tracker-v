@@ -1,10 +1,11 @@
 import { state } from './state.js';
 import { WEIGHT_KEYS, WEIGHT_SUFFIXES } from './config.js';
-import { sanitizeInt, generateId, getTodayIso, formatDateDisplay, deepClone } from './utils.js';
-import { closeModal } from './ui.js';
+import { sanitizeInt, generateId, getTodayIso, formatDateDisplay, isValidIsoDate } from './utils.js';
+import { closeModal, showToast } from './ui.js';
 import { updateAllViews } from './render.js';
 import { hasBatchPending, backToBatch } from './ocr.js';
-import { pushUndo } from './undo.js';
+import { showAlert, showConfirm, showChoice } from './dialog.js';
+import { downloadBackupFile } from './backup.js';
 
 function parseWeights(prefix) {
   const out = {};
@@ -22,17 +23,19 @@ function findDuplicate(type, date, weights) {
   return state.appData[type].find(r => r.date === date && weightsEqual(r.weights, weights));
 }
 
-export function saveRecord() {
+export async function saveRecord() {
   const date = document.getElementById('inputDate').value || getTodayIso();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { alert('Ngày không hợp lệ!'); return; }
-  if (isNaN(new Date(date).getTime()))   { alert('Ngày không hợp lệ!'); return; }
+  if (!isValidIsoDate(date)) {
+    await showAlert('Ngày không hợp lệ!', { title: 'Lỗi', okText: 'Đóng' });
+    return;
+  }
 
   const editId   = document.getElementById('editEntryId').value;
   const editType = document.getElementById('editEntryType').value;
   const wasFromBatch = hasBatchPending();
 
   if (editId && editType) {
-    // === SỬA BẢN GHI ===
+    // === SỬA ===
     const numId  = parseInt(editId, 10);
     const prefix = editType === 'delivery' ? 'del_inp'
                  : editType === 'pickup'   ? 'pick_inp'
@@ -40,31 +43,27 @@ export function saveRecord() {
     const weights = parseWeights(prefix);
     const idx = state.appData[editType].findIndex(it => it.id === numId);
     if (idx === -1) {
-      alert('Không tìm thấy bản ghi để cập nhật.');
-      closeModal(true); updateAllViews(); return;
+      await showAlert('Không tìm thấy bản ghi để cập nhật.', { title: 'Lỗi', okText: 'Đóng' });
+      closeModal(true);
+      updateAllViews();
+      return;
     }
 
-    // Check trùng (trừ chính nó)
     const dup = state.appData[editType].find(r =>
       r.id !== numId && r.date === date && weightsEqual(r.weights, weights)
     );
     if (dup) {
       const typeLabel = editType === 'delivery' ? 'Giao' : editType === 'pickup' ? 'Lấy' : 'Hoàn';
-      alert(`🚫 Không thể lưu!\n\nBản ghi ${typeLabel} ngày ${formatDateDisplay(date)} đã tồn tại với CÙNG số liệu.\n\nHãy sửa số liệu khác hoặc xóa bản ghi cũ trước.`);
+      await showAlert(
+        `Bản ghi ${typeLabel} ngày ${formatDateDisplay(date)} đã tồn tại với CÙNG số liệu.\n\n` +
+        `Hãy sửa số liệu khác hoặc xóa bản ghi cũ trước.`,
+        { title: '🚫 Không thể lưu', okText: 'Đã hiểu' }
+      );
       return;
     }
 
-    const oldRecord = deepClone(state.appData[editType][idx]);
     state.appData[editType][idx].date    = date;
     state.appData[editType][idx].weights = weights;
-
-    pushUndo({
-      msg: `Đã sửa bản ghi ${formatDateDisplay(date)}`,
-      restore: () => {
-        const i = state.appData[editType].findIndex(it => it.id === numId);
-        if (i !== -1) state.appData[editType][i] = oldRecord;
-      }
-    });
   } else {
     // === THÊM MỚI ===
     const delW  = parseWeights('del_inp');
@@ -73,44 +72,28 @@ export function saveRecord() {
     const delT  = Object.values(delW).reduce((a, b) => a + b, 0);
     const pickT = Object.values(pickW).reduce((a, b) => a + b, 0);
     const retT  = Object.values(retW).reduce((a, b) => a + b, 0);
-    if (delT + pickT + retT === 0) { alert('Chưa nhập số liệu nào!'); return; }
+    if (delT + pickT + retT === 0) {
+      await showAlert('Chưa nhập số liệu nào!', { title: 'Thiếu dữ liệu', okText: 'Đóng' });
+      return;
+    }
 
-    // CHẶN LUÔN nếu trùng
     const dups = [];
     if (delT  > 0 && findDuplicate('delivery', date, delW))  dups.push('Giao');
     if (pickT > 0 && findDuplicate('pickup',   date, pickW)) dups.push('Lấy');
     if (retT  > 0 && findDuplicate('return',   date, retW))  dups.push('Hoàn');
 
     if (dups.length > 0) {
-      alert(`🚫 Không thể lưu!\n\nNgày ${formatDateDisplay(date)} đã tồn tại bản ghi ${dups.join(', ')} với CÙNG số liệu.\n\nHãy:\n• Sửa số liệu khác\n• Hoặc xóa bản ghi cũ trước`);
+      await showAlert(
+        `Ngày ${formatDateDisplay(date)} đã tồn tại bản ghi ${dups.join(', ')} với CÙNG số liệu.\n\n` +
+        `Hãy:\n• Sửa số liệu khác\n• Hoặc xóa bản ghi cũ trước`,
+        { title: '🚫 Không thể lưu', okText: 'Đã hiểu' }
+      );
       return;
     }
 
-    const addedIds = [];
-    if (delT  > 0) {
-      const id = generateId();
-      state.appData.delivery.unshift({ id, date, weights: delW });
-      addedIds.push({ type: 'delivery', id });
-    }
-    if (pickT > 0) {
-      const id = generateId() + 1;
-      state.appData.pickup.unshift({ id, date, weights: pickW });
-      addedIds.push({ type: 'pickup', id });
-    }
-    if (retT  > 0) {
-      const id = generateId() + 2;
-      state.appData.return.unshift({ id, date, weights: retW });
-      addedIds.push({ type: 'return', id });
-    }
-
-    pushUndo({
-      msg: `Đã thêm ${addedIds.length} bản ghi ngày ${formatDateDisplay(date)}`,
-      restore: () => {
-        addedIds.forEach(({ type, id }) => {
-          state.appData[type] = state.appData[type].filter(it => it.id !== id);
-        });
-      }
-    });
+    if (delT  > 0) state.appData.delivery.unshift({ id: generateId(), date, weights: delW });
+    if (pickT > 0) state.appData.pickup.unshift({ id: generateId(), date, weights: pickW });
+    if (retT  > 0) state.appData.return.unshift({ id: generateId(), date, weights: retW });
   }
 
   closeModal(true);
@@ -121,44 +104,88 @@ export function saveRecord() {
   }
 }
 
-export function deleteRecord(type, id) {
+export async function deleteRecord(type, id) {
   const arr = state.appData[type];
   const idx = arr.findIndex(it => it.id === id);
   if (idx === -1) return;
-  if (!confirm('Bạn muốn xóa bản ghi này?')) return;
 
-  const removed = deepClone(arr[idx]);
-  const typeLabel = type === 'delivery' ? 'Giao' : type === 'pickup' ? 'Lấy' : 'Hoàn';
-
-  pushUndo({
-    msg: `Đã xóa bản ghi ${typeLabel} ngày ${formatDateDisplay(removed.date)}`,
-    restore: () => {
-      state.appData[type].splice(idx, 0, removed);
-    }
+  const ok = await showConfirm('Bạn muốn xóa bản ghi này?', {
+    title: 'Xóa bản ghi',
+    okText: 'Xóa',
+    cancelText: 'Hủy',
+    danger: true
   });
+  if (!ok) return;
 
   arr.splice(idx, 1);
   updateAllViews();
 }
 
-export function clearAllHistory() {
+// Xóa toàn bộ — chỉ HỎI, không bắt buộc backup
+export async function clearAllHistory() {
   const total = state.appData.delivery.length + state.appData.pickup.length + state.appData.return.length;
-  if (total === 0) return;
-  if (!confirm('Bạn chắc chắn muốn xóa toàn bộ lịch sử?\nBản sao lưu tự động cũng sẽ bị xóa.')) return;
+  if (total === 0) {
+    await showAlert('Không có bản ghi nào để xóa.', { title: 'Không có dữ liệu', okText: 'Đóng' });
+    return;
+  }
 
-  const backup = deepClone(state.appData);
-  const vaultBackup = localStorage.getItem('spx_backup_vault');
-
-  pushUndo({
-    msg: `Đã xóa ${total} bản ghi`,
-    restore: () => {
-      state.appData = backup;
-      if (vaultBackup) localStorage.setItem('spx_backup_vault', vaultBackup);
+  // ═══════════════════════════════════════════════════════════
+  //  DIALOG 1: Hỏi có muốn lưu backup trước không? (3 lựa chọn)
+  // ═══════════════════════════════════════════════════════════
+  const choice = await showChoice(
+    `Bạn sắp xóa TOÀN BỘ ${total} bản ghi.\n\n` +
+    `Hành động này KHÔNG THỂ KHÔI PHỤC.\n\n` +
+    `Bạn muốn lưu file backup về máy trước khi xóa không?`,
+    {
+      title: '⚠️ Xóa toàn bộ nhật ký',
+      icon: '⚠️',
+      buttons: [
+        { id: 'cancel',             text: '← Hủy',                variant: 'ghost'   },
+        { id: 'backup_then_delete', text: '📥 Có, lưu backup',     variant: 'primary' },
+        { id: 'delete_now',         text: '🗑️ Không, xóa luôn',   variant: 'danger'  }
+      ]
     }
-  });
+  );
 
+  if (choice === 'cancel') return;
+
+  // ═══════════════════════════════════════════════════════════
+  //  Nếu chọn "Có lưu backup": lưu file + xác nhận đã lưu xong
+  // ═══════════════════════════════════════════════════════════
+  if (choice === 'backup_then_delete') {
+    // Trigger download NGAY trong stack này để browser cho phép (user gesture)
+    downloadBackupFile('SPX_BeforeDelete');
+
+    // Đợi browser bắt đầu tải
+    await new Promise(r => setTimeout(r, 800));
+
+    // DIALOG 2: Xác nhận đã lưu xong chưa
+    const confirmDelete = await showConfirm(
+      `📁 File backup đã lưu về thư mục Downloads chưa?\n\n` +
+      `Nếu đã thấy file → bấm ĐÃ LƯU, XÓA LUÔN.\n` +
+      `Nếu chưa thấy → bấm HỦY XÓA để kiểm tra lại.`,
+      {
+        title: '🚨 Xác nhận xóa',
+        okText: '🗑️ Đã lưu xong, xóa luôn',
+        cancelText: '← Chưa lưu, hủy xóa',
+        danger: true
+      }
+    );
+
+    if (!confirmDelete) return;   // user chưa thấy file → không xóa
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  Tiến hành xóa
+  // ═══════════════════════════════════════════════════════════
   state.appData = { delivery: [], pickup: [], return: [] };
   localStorage.removeItem('spx_backup_vault');
   localStorage.removeItem('spx_dual_records');
   updateAllViews();
+
+  // Toast xác nhận
+  const finalMsg = choice === 'backup_then_delete'
+    ? `✅ Đã lưu backup và xóa ${total} bản ghi`
+    : `⚠️ Đã xóa ${total} bản ghi (không backup)`;
+  showToast(finalMsg, choice === 'backup_then_delete' ? 'success' : 'warning', 3000);
 }

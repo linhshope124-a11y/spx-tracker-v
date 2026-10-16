@@ -1,4 +1,5 @@
 import { TABLE_4_DATA, TABLE_5_DATA, TABLE_6_DATA, WEIGHT_KEYS } from './config.js';
+import { getCurrentMonthIso, getTodayIso } from './utils.js';
 
 export function lookupTier(orders, colIdx, tableData) {
   if (orders === 0) {
@@ -34,31 +35,61 @@ export function lookupTier(orders, colIdx, tableData) {
   };
 }
 
-export function isDateInCurrentPeriod(isoDate, period) {
-  if (period === 'all') return true;
-  if (!isoDate) return false;
-  const now = new Date();
-  const [y, m, d] = isoDate.split('-').map(Number);
-  const curY = now.getFullYear(), curM = now.getMonth() + 1, curD = now.getDate();
-  if (period === 'today')      return y === curY && m === curM && d === curD;
-  if (period === 'this_month') return y === curY && m === curM;
-  if (period === 'last_month') {
-    let lm = curM - 1, ly = curY;
-    if (lm === 0) { lm = 12; ly--; }
-    return y === ly && m === lm;
+/**
+ * v46: Kiểm tra 1 ngày có thuộc kỳ đang xem hay không
+ *
+ * @param {string} isoDate      - "2026-10-02"
+ * @param {string} periodMode   - 'month' | 'day'
+ * @param {string} currentMonth - "2026-10"  (chỉ dùng khi mode='month')
+ * @param {string} currentDate  - "2026-10-02" (chỉ dùng khi mode='day')
+ * @returns {boolean}
+ */
+export function isDateInCurrentPeriod(isoDate, periodMode, currentMonth, currentDate) {
+  if (typeof isoDate !== 'string' || isoDate.length !== 10) return false; // dữ liệu đã được sanitize khi nạp/nhập
+
+  // ===== Mode: DAY — so khớp chính xác =====
+  if (periodMode === 'day') {
+    const cd = currentDate || getTodayIso();
+    return isoDate === cd;
   }
-  return true;
+
+  // ===== Mode: MONTH (default) =====
+  const cm = currentMonth || getCurrentMonthIso();
+  const monthPrefix = cm + '-';
+  return isoDate.startsWith(monthPrefix);
 }
 
-export function aggregateWeights(records, period) {
+/**
+ * v46: Aggregate weights theo kỳ đang xem
+ */
+export function aggregateWeights(records, periodMode, currentMonth, currentDate) {
   const agg = { del: [0,0,0,0,0,0,0,0], pick: [0,0,0,0,0,0,0,0], ret: [0,0,0,0,0,0,0,0] };
   const total = { del: 0, pick: 0, ret: 0 };
-  records.delivery.filter(r => isDateInCurrentPeriod(r.date, period))
-    .forEach(r => WEIGHT_KEYS.forEach((k, i) => { const v = parseInt(r.weights[k], 10) || 0; agg.del[i] += v; total.del += v; }));
-  records.pickup.filter(r => isDateInCurrentPeriod(r.date, period))
-    .forEach(r => WEIGHT_KEYS.forEach((k, i) => { const v = parseInt(r.weights[k], 10) || 0; agg.pick[i] += v; total.pick += v; }));
-  records.return.filter(r => isDateInCurrentPeriod(r.date, period))
-    .forEach(r => WEIGHT_KEYS.forEach((k, i) => { const v = parseInt(r.weights[k], 10) || 0; agg.ret[i] += v; total.ret += v; }));
+
+  records.delivery
+    .filter(r => isDateInCurrentPeriod(r.date, periodMode, currentMonth, currentDate))
+    .forEach(r => WEIGHT_KEYS.forEach((k, i) => {
+      const v = parseInt(r.weights[k], 10) || 0;
+      agg.del[i] += v;
+      total.del += v;
+    }));
+
+  records.pickup
+    .filter(r => isDateInCurrentPeriod(r.date, periodMode, currentMonth, currentDate))
+    .forEach(r => WEIGHT_KEYS.forEach((k, i) => {
+      const v = parseInt(r.weights[k], 10) || 0;
+      agg.pick[i] += v;
+      total.pick += v;
+    }));
+
+  records.return
+    .filter(r => isDateInCurrentPeriod(r.date, periodMode, currentMonth, currentDate))
+    .forEach(r => WEIGHT_KEYS.forEach((k, i) => {
+      const v = parseInt(r.weights[k], 10) || 0;
+      agg.ret[i] += v;
+      total.ret += v;
+    }));
+
   return { agg, total };
 }
 

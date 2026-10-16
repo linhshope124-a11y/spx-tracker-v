@@ -1,10 +1,72 @@
+// =============================================================
+// OCR ENGINE — PART 1/2
+// Imports · Config · Worker · Preprocess · Parse · Post-process
+// =============================================================
+
 import { state } from './state.js';
 import { WEIGHT_KEYS } from './config.js';
 import { getTodayIso, formatDateDisplay, generateId } from './utils.js';
-import { openAddModal, openEditModal, switchModalSubTab } from './ui.js';
+import { openAddModal, openEditModal, switchModalSubTab, showToast, isAutoSaveOCR } from './ui.js';
 import { updateAllViews } from './render.js';
+import { showConfirm, showAlert } from './dialog.js';
+import {
+  cacheGetAsync, cacheSet,
+  clearOcrCache as _clearOcrCacheImpl,
+  initOcrCache, getOcrCacheStats, refreshOcrCacheStats
+} from './ocr-cache.js';
+
+export { getOcrCacheStats, initOcrCache, refreshOcrCacheStats } from './ocr-cache.js';
+
+// ==================== CONFIG ====================
+const DISABLE_AUTO_SAVE = false;
+const DRY_RUN_OCR       = false;
+const OCR_TIMEOUT_MS    = 60000;
+
+// ==================== ABORT CONTROLLER ====================
+let _ocrAbortController = null;
+
+export function cancelOcr() {
+  if (_ocrAbortController) {
+    _ocrAbortController.abort();
+    _ocrAbortController = null;
+    return true;
+  }
+  return false;
+}
+
+function _newAbortController() {
+  _ocrAbortController = new AbortController();
+  return _ocrAbortController;
+}
+
+function _checkAborted(signal) {
+  if (signal && signal.aborted) throw new Error('OCR_CANCELLED');
+}
+
+function _clearAbortController(ctrl) {
+  if (_ocrAbortController === ctrl) _ocrAbortController = null;
+}
 
 // ==================== TESSERACT WORKER ====================
+let _tessLibPromise = null;
+function ensureTesseractLib() {
+  if (window.Tesseract) return Promise.resolve();
+  if (_tessLibPromise) return _tessLibPromise;
+  _tessLibPromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+    s.async = true;
+    s.onload = resolve;
+    s.onerror = () => {
+      _tessLibPromise = null;
+      s.remove();
+      reject(new Error('Không tải được thư viện OCR — kiểm tra mạng'));
+    };
+    document.head.appendChild(s);
+  });
+  return _tessLibPromise;
+}
+
 let cachedTesseractWorker = null;
 let workerLoadingPromise = null;
 
@@ -12,6 +74,7 @@ async function getTesseractWorker() {
   if (cachedTesseractWorker) return cachedTesseractWorker;
   if (workerLoadingPromise) return workerLoadingPromise;
   workerLoadingPromise = (async () => {
+    await ensureTesseractLib();
     const worker = await Tesseract.createWorker('vie', 1, {
       logger: m => {
         const overlay = document.getElementById('ocrLoadingOverlay');
@@ -39,9 +102,79 @@ async function getTesseractWorker() {
   catch (e) { workerLoadingPromise = null; throw e; }
 }
 
+async function resetTesseractWorker() {
+  if (cachedTesseractWorker) {
+    try { await cachedTesseractWorker.terminate(); } catch {}
+  }
+  cachedTesseractWorker = null;
+  workerLoadingPromise = null;
+}
+
 export async function preloadTesseractWorker() {
   try { await getTesseractWorker(); console.log('[OCR] Worker sẵn sàng'); }
   catch (e) { console.warn('[OCR] Preload thất bại:', e); }
+}
+
+// ==================== TIMEOUT WRAPPER ====================
+function withTimeout(promise, ms, signal) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`OCR timeout sau ${ms / 1000}s`)),
+      ms
+    );
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new Error('OCR_CANCELLED'));
+    };
+    if (signal) signal.addEventListener('abort', onAbort, { once: true });
+
+    promise.then(v => {
+      clearTimeout(timer);
+      if (signal) signal.removeEventListener('abort', onAbort);
+      resolve(v);
+    }).catch(e => {
+      clearTimeout(timer);
+      if (signal) signal.removeEventListener('abort', onAbort);
+      reject(e);
+    });
+  });
+}
+
+// ==================== OCR RECOGNIZE ====================
+async function ocrRecognize(preprocessedDataUrl, signal) {
+  _checkAborted(signal);
+
+  try {
+    const worker = await getTesseractWorker();
+    _checkAborted(signal);
+    const result = await withTimeout(
+      worker.recognize(preprocessedDataUrl),
+      OCR_TIMEOUT_MS,
+      signal
+    );
+    return result.data.text || '';
+  } catch (err) {
+    if (err.message === 'OCR_CANCELLED') throw err;
+
+    console.warn('[OCR] Attempt 1 fail → reset worker + retry:', err.message);
+    await resetTesseractWorker();
+    _checkAborted(signal);
+
+    try {
+      const worker = await getTesseractWorker();
+      _checkAborted(signal);
+      const result = await withTimeout(
+        worker.recognize(preprocessedDataUrl),
+        OCR_TIMEOUT_MS,
+        signal
+      );
+      return result.data.text || '';
+    } catch (err2) {
+      if (err2.message === 'OCR_CANCELLED') throw err2;
+      console.warn('[OCR] Attempt 2 fail:', err2.message);
+      throw new Error('Không đọc được ảnh — ' + err2.message);
+    }
+  }
 }
 
 // ==================== HELPERS ====================
@@ -97,13 +230,15 @@ function otsuThreshold(gray) {
 }
 
 // ==================== PREPROCESSING ====================
-async function preprocessImage(rawDataUrl, options = {}) {
-  const { upscale = 2.0, useOtsu = true, threshold = 145 } = options;
+async function preprocessImage(rawDataUrl, options = {}, signal) {
+  _checkAborted(signal);
+  const { upscale = 2.0, useOtsu = true, threshold = 145, raw = false } = options;
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
       try {
+        _checkAborted(signal);
         const scale = Math.min(4, upscale);
         const canvas = document.createElement('canvas');
         canvas.width  = Math.floor(img.width  * scale);
@@ -115,16 +250,25 @@ async function preprocessImage(rawDataUrl, options = {}) {
 
         const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const data = imgData.data;
-        const gray = new Uint8Array(data.length / 4);
-        for (let i = 0, j = 0; i < data.length; i += 4, j++) {
-          gray[j] = Math.round(data[i] * 0.299 + data[i+1] * 0.587 + data[i+2] * 0.114);
+
+        if (raw) {
+          for (let i = 0; i < data.length; i += 4) {
+            const g = Math.round(data[i] * 0.299 + data[i+1] * 0.587 + data[i+2] * 0.114);
+            data[i] = data[i+1] = data[i+2] = g;
+          }
+        } else {
+          const gray = new Uint8Array(data.length / 4);
+          for (let i = 0, j = 0; i < data.length; i += 4, j++) {
+            gray[j] = Math.round(data[i] * 0.299 + data[i+1] * 0.587 + data[i+2] * 0.114);
+          }
+          const th = useOtsu ? otsuThreshold(gray) : threshold;
+          for (let i = 0, j = 0; i < data.length; i += 4, j++) {
+            const val = gray[j] > th ? 255 : 0;
+            data[i] = data[i+1] = data[i+2] = val;
+            data[i+3] = 255;
+          }
         }
-        const th = useOtsu ? otsuThreshold(gray) : threshold;
-        for (let i = 0, j = 0; i < data.length; i += 4, j++) {
-          const val = gray[j] > th ? 255 : 0;
-          data[i] = data[i+1] = data[i+2] = val;
-          data[i+3] = 255;
-        }
+
         ctx.putImageData(imgData, 0, 0);
         resolve({ dataUrl: canvas.toDataURL('image/png'), width: canvas.width, height: canvas.height });
       } catch (e) { reject(e); }
@@ -178,13 +322,6 @@ function detectActiveTabByOrangeLine(imageSource) {
   });
 }
 
-// ==================== OCR ====================
-async function ocrRecognize(preprocessedDataUrl) {
-  const worker = await getTesseractWorker();
-  const result = await worker.recognize(preprocessedDataUrl);
-  return result.data.text || '';
-}
-
 // ==================== RANGE DEFS ====================
 const RANGE_DEFS = [
   { key: '0_2',     min: 0,  max: 2 },
@@ -197,11 +334,18 @@ const RANGE_DEFS = [
   { key: 'over_15', min: 15, max: 999 }
 ];
 
-function getRangeKey(minV, maxV) {
+function identifyRangeKey(minV, maxV) {
   for (const d of RANGE_DEFS) {
     if (d.min === minV && d.max === maxV) return d.key;
   }
-  if (minV === 15 && maxV > 15) return 'over_15';
+  if (minV === 0)  return '0_2';
+  if (minV === 2)  return '2_4';
+  if (minV === 4)  return '4_6';
+  if (minV === 6)  return '6_8';
+  if (minV === 8)  return '8_10';
+  if (minV === 10) return '10_12';
+  if (minV === 12) return '12_15';
+  if (minV === 15) return 'over_15';
   return null;
 }
 
@@ -209,33 +353,61 @@ function getRangeKey(minV, maxV) {
 function parseOcrText(cleanText) {
   const weights = { '0_2':0,'2_4':0,'4_6':0,'6_8':0,'8_10':0,'10_12':0,'12_15':0,'over_15':0 };
   const confidences = {};
-  const text = cleanText.replace(/[–—]/g, '-').replace(/,/g, '.');
 
-  // 1. Tổng đơn kỳ vọng
-  const totalRegex = /T[oổ]ng\s*[:\-]?\s*(\d{1,6})/i;
+  // FIX 1: Thêm Ì, Í vào replace (OCR đọc số 1 thành Ì)
+  const text = cleanText
+    .replace(/[–—]/g, '-')
+    .replace(/,/g, '.')
+    .replace(/[¡ÌÍ]/g, '1')
+    .split('\n')
+    .filter(line => {
+      if (/\b\d{1,2}:\d{2}\b/.test(line)) return false;
+      if (/^\s*\d{4,}/.test(line)) return false;
+      if (/Ch[iỉ]\s*ti[eế]t/i.test(line)) return false;
+      return true;
+    })
+    .join('\n');
+
+  const totalRegex = /T[oôổ]ng\s*[:\-]?\s*(\d{1,6})/i;
   const totalMatch = text.match(totalRegex);
   let expectedTotal = totalMatch ? parseInt(totalMatch[1], 10) : null;
   if (!Number.isFinite(expectedTotal)) expectedTotal = null;
-  const totalPos = totalMatch ? totalMatch.index : -1;
-  const totalEnd = totalMatch ? totalMatch.index + totalMatch[0].length : -1;
 
-  // 2. Ranges
-  const rangeRegex = /(\d{1,2})(?:\.\d{1,3})?\s*-\s*(\d{1,2})(?:\.\d{1,3})?/g;
+  const rangeRegex = /(\d{1,3})(?:[.,]\d{1,3})?\s*[-–~]\s*(\d{1,6})(?:[.,]\d{1,3})?/g;
   const ranges = [];
   let m;
   while ((m = rangeRegex.exec(text)) !== null) {
     const minV = parseInt(m[1], 10);
     const maxV = parseInt(m[2], 10);
-    const key = getRangeKey(minV, maxV);
-    if (key) {
-      ranges.push({ key, pos: m.index, endPos: m.index + m[0].length });
-    }
+    const key = identifyRangeKey(minV, maxV);
+    if (key) ranges.push({ key, pos: m.index, endPos: m.index + m[0].length });
   }
   ranges.sort((a, b) => a.pos - b.pos);
 
-  // 3. Numbers
-  const numRegex = /\d{1,6}/g;
+  const totalPos = totalMatch ? totalMatch.index : -1;
+  const totalEnd = totalMatch ? totalMatch.index + totalMatch[0].length : -1;
+
+  // FIX 2: donRegex accept ¡ Ì Í l I | khi đứng trước "Đơn"
+  const donNums = [];
+  const donRegex = /([\d¡ÌÍlI|]{1,5})\s*[ĐDđdB]\s*[ơo]n\b/gi;
+  while ((m = donRegex.exec(text)) !== null) {
+    if (!/[ĐDB]/.test(m[0])) continue;   // chữ thường = dòng "Tổng N đơn hàng", không phải thẻ
+
+    const cleaned = m[1].replace(/[¡ÌÍlI|]/g, '1');
+    const val = parseInt(cleaned, 10);
+    if (!Number.isFinite(val)) continue;
+
+    const pos = m.index;
+    const endPos = pos + m[0].length;
+    if (ranges.some(r => pos < r.endPos && endPos > r.pos)) continue;
+    if (totalPos >= 0 && pos < totalEnd && endPos > totalPos) continue;
+    if (val > 99999) continue;
+    donNums.push({ value: val, pos, endPos });
+  }
+  donNums.sort((a, b) => a.pos - b.pos);
+
   const nums = [];
+  const numRegex = /\d{1,6}/g;
   while ((m = numRegex.exec(text)) !== null) {
     const val = parseInt(m[0], 10);
     const pos = m.index;
@@ -244,23 +416,22 @@ function parseOcrText(cleanText) {
     if (totalPos >= 0 && pos >= totalPos && pos <= totalEnd + 3) continue;
     if (val === 0) continue;
     if (val > 99999) continue;
+    // FIX 3: Bỏ số dính chữ (h2, ab3) — nhưng CHO PHÉP nếu ký tự trước là "h" và theo sau là "Đơn"
+    if (pos > 0 && /[A-Za-zÀ-ỹ]/.test(text[pos - 1])) {
+      const beforeChar = text[pos - 1];
+      const afterText = text.slice(endPos, endPos + 12);
+      if (!/[hH]/.test(beforeChar) || !/[ĐDđd]\s*[ơo]n/i.test(afterText)) continue;
+    }
     nums.push({ value: val, pos, endPos });
   }
   nums.sort((a, b) => a.pos - b.pos);
 
-  // 4. Ordered match
-  const orderedResult = {};
-  for (let i = 0; i < ranges.length && i < nums.length; i++) {
-    orderedResult[ranges[i].key] = nums[i].value;
-  }
-
-  // 5. Distance match
-  function distanceMatch(mode) {
+  function distanceMatch(numList, mode) {
     const result = {};
     const used = new Set();
     ranges.forEach(r => {
       let best = null, bestDist = 9999;
-      nums.forEach((n, idx) => {
+      numList.forEach((n, idx) => {
         if (used.has(idx)) return;
         let dist;
         if (mode === 'before') {
@@ -270,9 +441,9 @@ function parseOcrText(cleanText) {
           if (n.pos < r.endPos) return;
           dist = n.pos - r.endPos;
         } else {
-          dist = Math.abs(n.pos - r.pos);
+          dist = Math.min(Math.abs(n.pos - r.pos), Math.abs(n.endPos - r.endPos));
         }
-        if (dist < bestDist && dist < 400) {
+        if (dist < bestDist && dist < 800) {
           bestDist = dist;
           best = { idx, value: n.value };
         }
@@ -282,47 +453,126 @@ function parseOcrText(cleanText) {
     return result;
   }
 
+  const orderedResult = {};
+  for (let i = 0; i < ranges.length && i < nums.length; i++) {
+    orderedResult[ranges[i].key] = nums[i].value;
+  }
+
   const sumOf = r => Object.values(r).reduce((a, b) => a + b, 0);
   const countOf = r => Object.keys(r).length;
 
-  let bestResult = orderedResult;
-  let bestMode = 'ordered';
-
-  if (expectedTotal !== null) {
-    const diffOrdered = Math.abs(sumOf(orderedResult) - expectedTotal);
-    if (diffOrdered > 0) {
-      const mBefore = distanceMatch('before');
-      const mAfter  = distanceMatch('after');
-      const mClosest = distanceMatch('closest');
-      const candidates = [
-        { name: 'ordered', res: orderedResult, diff: diffOrdered, cnt: countOf(orderedResult) },
-        { name: 'before',  res: mBefore,       diff: Math.abs(sumOf(mBefore) - expectedTotal),  cnt: countOf(mBefore) },
-        { name: 'after',   res: mAfter,        diff: Math.abs(sumOf(mAfter) - expectedTotal),   cnt: countOf(mAfter) },
-        { name: 'closest', res: mClosest,      diff: Math.abs(sumOf(mClosest) - expectedTotal), cnt: countOf(mClosest) }
-      ];
-      candidates.sort((a, b) => {
-        if (a.diff !== b.diff) return a.diff - b.diff;
-        return b.cnt - a.cnt;
-      });
-      bestResult = candidates[0].res;
-      bestMode = candidates[0].name;
-    }
+  const donResult = distanceMatch(donNums, 'closest');
+  const donOrdered = {};
+  if (donNums.length === ranges.length) {
+    ranges.forEach((r, i) => { donOrdered[r.key] = donNums[i].value; });
   }
+  const mClosest = distanceMatch(nums, 'closest');
+  const mBefore  = distanceMatch(nums, 'before');
+  const mAfter   = distanceMatch(nums, 'after');
 
-  Object.keys(bestResult).forEach(k => {
-    weights[k] = bestResult[k];
-    confidences[k] = 88;
+  const candidates = [
+    { name: 'don-ordered', res: donOrdered,    cnt: countOf(donOrdered),    priority: 0 },
+    { name: 'don-pattern', res: donResult,     cnt: countOf(donResult),     priority: 1 },
+    { name: 'closest',     res: mClosest,      cnt: countOf(mClosest),      priority: 2 },
+    { name: 'ordered',     res: orderedResult, cnt: countOf(orderedResult), priority: 3 },
+    { name: 'before',      res: mBefore,       cnt: countOf(mBefore),       priority: 4 },
+    { name: 'after',       res: mAfter,        cnt: countOf(mAfter),        priority: 5 }
+  ];
+
+  candidates.forEach(c => {
+    c.diff = expectedTotal !== null ? Math.abs(sumOf(c.res) - expectedTotal) : 0;
+  });
+
+  candidates.sort((a, b) => {
+    if (a.diff !== b.diff) return a.diff - b.diff;
+    if (expectedTotal === null && a.cnt !== b.cnt) return b.cnt - a.cnt;
+    if (a.priority !== b.priority) return a.priority - b.priority;
+    return b.cnt - a.cnt;
+  });
+
+  const best = candidates[0];
+  let baseConf = 88;
+  if (best.diff === 0) baseConf = 95;
+  else if (best.diff <= 2) baseConf = 92;
+
+  Object.keys(best.res).forEach(k => {
+    weights[k] = best.res[k];
+    confidences[k] = baseConf;
   });
 
   const totalFound = Object.values(weights).reduce((a, b) => a + b, 0);
-  return { weights, confidences, expectedTotal, totalFound, mode: bestMode };
+  return { weights, confidences, expectedTotal, totalFound, mode: best.name };
 }
 
-// ==================== EXTRACT DATE — FIXED ====================
-function extractDate(text) {
+// ==================== POST-PROCESS: Fix chữ số nhầm ====================
+function postProcessFixDigits(parsed) {
+  if (parsed.expectedTotal === null) return null;
+  if (parsed.totalFound === parsed.expectedTotal) return null;
+
+  const SUBS = [
+    { from: '3', to: '9' },   // 06/10 Lấy (13 → 19)
+    { from: '2', to: '9' },
+    { from: '1', to: '7' },
+    { from: '8', to: '6' },
+    { from: '6', to: '5' },
+    { from: '8', to: '3' }
+  ];
+
+  const keys = ['0_2', '2_4', '4_6', '6_8', '8_10', '10_12', '12_15', 'over_15'];
+  const ordered = ['0_2', ...keys.filter(k => k !== '0_2')];
+
+  // Duyệt 2 vòng:
+  //   Vòng 1 (strictMode=true):  chỉ fix có tỉ lệ đổi <= 3× (an toàn)
+  //   Vòng 2 (strictMode=false): chấp nhận fix bất kỳ → đánh dấu isRisky
+  for (const strictMode of [true, false]) {
+    for (const key of ordered) {
+      const oldVal = parsed.weights[key];
+      if (!oldVal || oldVal === 0) continue;
+      const str = String(oldVal);
+
+      for (let i = 0; i < str.length; i++) {
+        for (const s of SUBS) {
+          if (str[i] !== s.from) continue;
+
+          const newVal = parseInt(str.substring(0, i) + s.to + str.substring(i + 1), 10);
+          if (!Number.isFinite(newVal)) continue;
+
+          // Chặn fix "vô lý": thay đổi > 3× giá trị gốc → bỏ qua (chỉ vòng 1)
+          const ratio = newVal / Math.max(1, oldVal);
+          if (strictMode && ratio > 3) continue;
+
+          const newTotal = parsed.totalFound - oldVal + newVal;
+          if (newTotal === parsed.expectedTotal) {
+            return {
+              weights: { ...parsed.weights, [key]: newVal },
+              confidences: { ...parsed.confidences, [key]: 75 },
+              expectedTotal: parsed.expectedTotal,
+              totalFound: newTotal,
+              mode: parsed.mode + '+fix' + s.from + s.to,
+              // Thông tin chi tiết để hiện cảnh báo
+              fixInfo: {
+                key,
+                oldVal,
+                newVal,
+                from: s.from,
+                to: s.to,
+                delta: newVal - oldVal,
+                isRisky: ratio > 3
+              }
+            };
+          }
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+// ==================== EXTRACT DATE ====================
+function extractDateStrict(text) {
   const cleanText = text.replace(/,/g, '.');
 
-  // === Ưu tiên 1: DD/MM/YYYY (có năm rõ ràng) ===
   const fullMatch = cleanText.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4}|\d{2})/);
   if (fullMatch) {
     const day = parseInt(fullMatch[1], 10);
@@ -334,7 +584,6 @@ function extractDate(text) {
     }
   }
 
-  // === Ưu tiên 2: "Ngày DD/MM" (có keyword "ngày") ===
   const dayMatch = cleanText.match(/(?:ngày|ngay)\s*[-–:]?\s*(\d{1,2})[\/\-\.](\d{1,2})/i);
   if (dayMatch) {
     const day = parseInt(dayMatch[1], 10);
@@ -344,196 +593,586 @@ function extractDate(text) {
     }
   }
 
-  // === Ưu tiên 3: DD/MM hợp lệ bất kỳ (validate day 1-31, month 1-12) ===
   const allMatches = [...cleanText.matchAll(/(\d{1,2})[\/\-\.](\d{1,2})/g)];
   for (const m of allMatches) {
     const day = parseInt(m[1], 10);
     const month = parseInt(m[2], 10);
-    // Loại số vô lý: ngày 1-31, tháng 1-12
     if (day >= 1 && day <= 31 && month >= 1 && month <= 12) {
       return new Date().getFullYear() + '-' + String(month).padStart(2, '0') + '-' + String(day).padStart(2, '0');
     }
   }
 
-  // === Fallback: hôm nay ===
-  return getTodayIso();
+  return null;   // không thấy ngày trong ảnh
 }
 
-// ==================== CACHE ====================
-const ocrCache = new Map();
-const OCR_CACHE_MAX = 30;
+function extractDate(text) {
+  return extractDateStrict(text) || getTodayIso();
+}
 
-async function hashDataUrl(dataUrl) {
-  try {
-    const buf = new TextEncoder().encode(dataUrl);
-    const hashBuf = await crypto.subtle.digest('SHA-1', buf);
-    return Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
-  } catch {
-    let h = 0;
-    for (let i = 0; i < dataUrl.length; i++) h = (h * 31 + dataUrl.charCodeAt(i)) | 0;
-    return 'fb_' + h.toString(16);
-  }
-}
-function cacheGet(hash) {
-  if (!ocrCache.has(hash)) return null;
-  const v = ocrCache.get(hash);
-  ocrCache.delete(hash);
-  ocrCache.set(hash, v);
-  return v;
-}
-function cacheSet(hash, value) {
-  ocrCache.set(hash, value);
-  if (ocrCache.size > OCR_CACHE_MAX) {
-    const oldest = ocrCache.keys().next().value;
-    ocrCache.delete(oldest);
-  }
-}
+// =============================================================
+// =============================================================
+// OCR ENGINE — PART 2/2
+// Batch state · Smart Pipeline (6-pass) · Modals · Exports
+// =============================================================
+
+// ==================== LOG STORAGE ====================
+let _lastOcrLog = '';
 
 // ==================== BATCH STATE ====================
 let batchResults = [];
 let pendingAppend = false;
 
-// ==================== MAIN ====================
-export async function handleOcrImage(event) {
-  const files = Array.from(event.target.files || []);
-  event.target.value = '';
-  if (files.length === 0) { pendingAppend = false; return; }
+// ==================== HELPERS ====================
+function buildWeights(r) {
+  const suffixMap = {
+    '0_2':'w0_2','2_4':'w2_4','4_6':'w4_6','6_8':'w6_8',
+    '8_10':'w8_10','10_12':'w10_12','12_15':'w12_15','over_15':'wover_15'
+  };
+  const w = {};
+  WEIGHT_KEYS.forEach(wk => {
+    const suffix = Object.keys(suffixMap).find(k => suffixMap[k] === wk);
+    w[wk] = r.weights[suffix] || 0;
+  });
+  return w;
+}
 
-  const wasAppend = pendingAppend;
-  pendingAppend = false;
+function getTypeFromResult(r) {
+  if (r.detectedColorType === 'del')  return 'delivery';
+  if (r.detectedColorType === 'pick') return 'pickup';
+  if (r.detectedColorType === 'ret')  return 'return';
+  return null;
+}
 
-  const overlay = document.getElementById('ocrLoadingOverlay');
-  overlay.style.display = 'flex';
+function getTypeLabel(r) {
+  if (r.detectedColorType === 'del')  return 'Giao';
+  if (r.detectedColorType === 'pick') return 'Lấy';
+  if (r.detectedColorType === 'ret')  return 'Hoàn';
+  return 'Không rõ';
+}
 
+function findExactDuplicate(r) {
+  const type = getTypeFromResult(r);
+  if (!type) return null;
+  const weights = buildWeights(r);
+  return state.appData[type].find(rec =>
+    rec.date === r.parsedDate &&
+    WEIGHT_KEYS.every(k => (parseInt(rec.weights[k], 10) || 0) === (parseInt(weights[k], 10) || 0))
+  ) || null;
+}
+
+const EMPTY_THUMB = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI1NiIgaGVpZ2h0PSI1NiI+PGRlZnM+PHBhdHRlcm4gaWQ9ImciIHdpZHRoPSIxMCIgaGVpZ2h0PSIxMCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PHJlY3Qgd2lkdGg9IjUiIGhlaWdodD0iNSIgZmlsbD0iI2U1ZTdlYiIvPjxyZWN0IHg9IjUiIHk9IjUiIHdpZHRoPSI1IiBoZWlnaHQ9IjUiIGZpbGw9IiNlNWU3ZWIiLz48L3BhdHRlcm4+PC9kZWZzPjxyZWN0IHdpZHRoPSI1NiIgaGVpZ2h0PSI1NiIgZmlsbD0idXJsKCNnKSIvPjwvc3ZnPg==';
+
+// ==================== VALIDATE PHÂN BỐ ====================
+function validateDistribution(weights) {
+  const w = {
+    '0_2':    parseInt(weights['0_2'], 10)   || 0,
+    '2_4':    parseInt(weights['2_4'], 10)   || 0,
+    '4_6':    parseInt(weights['4_6'], 10)   || 0,
+    '6_8':    parseInt(weights['6_8'], 10)   || 0,
+    '8_10':   parseInt(weights['8_10'], 10)  || 0,
+    '10_12':  parseInt(weights['10_12'], 10) || 0,
+    '12_15':  parseInt(weights['12_15'], 10) || 0,
+    'over_15':parseInt(weights['over_15'], 10)|| 0
+  };
+  const total = Object.values(w).reduce((s, v) => s + v, 0);
+  if (total < 5) return { ok: true, warnings: [], suspectKeys: [] };
+
+  const warnings = [];
+  const suspects = new Set();
+
+  if (w['0_2'] / total < 0.5) {
+    warnings.push(`Dải 0-2 chỉ ${Math.round(w['0_2']/total*100)}% (thường ≥50%)`);
+    suspects.add('0_2');
+  }
+  if (w['2_4'] >= 10 && w['0_2'] < w['2_4'] * 0.33) {
+    warnings.push('Dải 2-4 nhiều bất thường so với dải 0-2');
+    suspects.add('0_2'); suspects.add('2_4');
+  }
+  if (w['4_6'] >= 5 && w['2_4'] < w['4_6'] * 0.33) {
+    warnings.push('Dải 4-6 nhiều bất thường so với dải 2-4');
+    suspects.add('2_4'); suspects.add('4_6');
+  }
+  const maxKey = Object.keys(w).reduce((a, b) => w[a] > w[b] ? a : b);
+  if (w['0_2'] > 0 && w[maxKey] > w['0_2'] * 5) {
+    warnings.push('Có dải cao bất thường');
+    suspects.add(maxKey);
+  }
+  const small = w['0_2'] + w['2_4'] + w['4_6'];
+  if (small / total < 0.7) {
+    warnings.push(`Dải nhỏ chỉ ${Math.round(small/total*100)}% (thường ≥70%)`);
+    suspects.add('0_2'); suspects.add('2_4'); suspects.add('4_6');
+  }
+
+  return { ok: warnings.length === 0, warnings, suspectKeys: [...suspects] };
+}
+
+// ==================== AUTO-SAVE ====================
+async function tryAutoSave(r) {
+  if (DISABLE_AUTO_SAVE) return false;
+  if (!isAutoSaveOCR()) return false;
+  if (String(r.mode || '').includes('+fix')) return false;
+
+  const type = getTypeFromResult(r);
+  if (!type) return false;
+
+  const confs = Object.values(r.confidences).filter(c => c != null);
+  if (confs.length === 0) return false;
+  const allHigh = confs.every(c => c >= 85);
+  if (!allHigh) return false;
+
+  // Chỉ tự lưu khi đã ĐỐI CHIẾU được: đọc được Tổng và khớp, thấy tab, thấy ngày
+  if (r.expectedTotal === null || r.expectedTotal !== r.totalFound) return false;
+  if (r.tabDetected !== true || r.dateFound !== true) return false;
+  if (r.totalFound <= 0) return false;
+
+  const dist = validateDistribution(r.weights);
+  if (!dist.ok) return false;
+
+  if (DRY_RUN_OCR) return false;
+
+  const weights = buildWeights(r);
+  state.appData[type].unshift({ id: generateId(), date: r.parsedDate, weights });
+  updateAllViews();
+  return true;
+}
+
+// ==================== XÓA CACHE OCR ====================
+export async function clearOcrCache() {
+  return _clearOcrCacheImpl();
+}
+
+// ==================== HASH BLOB ====================
+async function hashBlob(file) {
+  if (typeof crypto === 'undefined' || !crypto.subtle) {
+    return 'fb_' + file.size + '_' + (file.name || '').length + '_' + (file.lastModified || 0);
+  }
   try {
-    const newResults = await processFiles(files);
-    overlay.style.display = 'none';
-
-    if (wasAppend) {
-      batchResults.push(...newResults);
-      renderBatchList();
-      document.getElementById('batchOcrModal').classList.add('active');
-      return;
-    }
-
-    const validCount = newResults.filter(r => !r.error).length;
-    if (files.length === 1 && validCount === 1) {
-      fillModalFromResult(newResults[0]);
-      return;
-    }
-    if (files.length === 1 && validCount === 0) {
-      alert('❌ Không đọc được ảnh: ' + newResults[0].error);
-      return;
-    }
-
-    batchResults = newResults;
-    openBatchOcrModal();
-  } catch (err) {
-    console.error(err);
-    overlay.style.display = 'none';
-    alert('Lỗi khi quét ảnh: ' + (err && err.message ? err.message : err));
+    const buf = await file.arrayBuffer();
+    const hashBuf = await crypto.subtle.digest('SHA-256', buf);
+    return Array.from(new Uint8Array(hashBuf))
+      .map(b => b.toString(16).padStart(2, '0')).join('');
+  } catch {
+    return 'fb_' + Date.now().toString(16) + '_' + file.size + '_' + (file.name || '').length;
   }
 }
 
-async function processFiles(files) {
-  const out = [];
+// ==================== COPY LOG ====================
+export async function copyOcrLog() {
+  const debugEl = document.getElementById('ocrDebugText');
+  let text = (debugEl && debugEl.innerText) ? debugEl.innerText.trim() : '';
+  if (!text) text = (_lastOcrLog || '').trim();
+
+  if (!text) {
+    showToast('Không có log để copy', 'warning', 1500);
+    return;
+  }
+
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      showToast('Đã copy log (' + text.length + ' ký tự)', 'success', 1800);
+      return;
+    }
+  } catch (e) {
+    console.warn('[OCR] Clipboard API fail:', e);
+  }
+
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.top = '-9999px';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    if (ok) {
+      showToast('Đã copy log (' + text.length + ' ký tự)', 'success', 1800);
+    } else {
+      showToast('Không copy được — thử giữ tay vào log', 'error', 2500);
+    }
+  } catch (e) {
+    showToast('Không copy được: ' + e.message, 'error', 2500);
+  }
+}
+
+function injectCopyLogButton() {
+  const toggleBtn = document.getElementById('ocrDebugToggle');
+  if (!toggleBtn) return;
+
+  const old = document.getElementById('ocrCopyLogBtn');
+  if (old) old.remove();
+
+  const copyBtn = document.createElement('button');
+  copyBtn.id = 'ocrCopyLogBtn';
+  copyBtn.type = 'button';
+  copyBtn.innerText = '📋 Copy log';
+  copyBtn.style.cssText = `
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-3);
+    font-size: 10px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-family: inherit;
+    font-weight: 600;
+    margin-left: 6px;
+  `;
+  copyBtn.onclick = () => copyOcrLog();
+
+  toggleBtn.parentNode.appendChild(copyBtn);
+}
+
+// ==================== CANCEL BUTTON ====================
+function ensureCancelButton() {
+  const overlay = document.getElementById('ocrLoadingOverlay');
+  if (!overlay) return;
+
+  if (overlay.querySelector('.ocr-cancel-btn')) return;
+
+  const btn = document.createElement('button');
+  btn.className = 'ocr-cancel-btn';
+  btn.innerText = '✕ Hủy';
+  btn.style.cssText = `
+    margin-top: 22px;
+    padding: 10px 26px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 700;
+    font-family: inherit;
+    cursor: pointer;
+    backdrop-filter: blur(4px);
+  `;
+  btn.onclick = () => cancelOcr();
+  overlay.appendChild(btn);
+}
+
+// ==================== PIPELINE ====================
+async function _runOcrFromFiles(files, wasAppend = false) {
+  if (!files || files.length === 0) return;
+
+  const ctrl = _newAbortController();
+  const signal = ctrl.signal;
+
+  const overlay = document.getElementById('ocrLoadingOverlay');
   const statusTitle = document.getElementById('ocrStatusTitle');
   const statusDesc  = document.getElementById('ocrStatusDesc');
-  statusTitle.innerText = 'Đang khởi tạo...';
-  statusDesc.innerText  = cachedTesseractWorker ? 'Worker sẵn sàng' : 'Lần đầu tải ~15MB...';
 
-  await getTesseractWorker();
+  if (overlay) overlay.style.display = 'flex';
+  ensureCancelButton();
 
-  for (let i = 0; i < files.length; i++) {
-    const file = files[i];
-    statusTitle.innerText = `Ảnh ${i + 1}/${files.length}`;
-    statusDesc.innerText  = 'Đang đọc file...';
+  try {
+    const results = [];
 
-    try {
-      const rawDataUrl = await readFileAsDataURL(file);
-      const hash   = await hashDataUrl(rawDataUrl);
-      const cached = cacheGet(hash);
+    for (let i = 0; i < files.length; i++) {
+      _checkAborted(signal);
+      if (statusTitle) statusTitle.innerText = `Ảnh ${i + 1}/${files.length}`;
+      if (statusDesc)  statusDesc.innerText  = 'Đang xử lý...';
 
-      if (cached) {
-        statusDesc.innerText = '⚡ Dùng cache...';
-        const cachedResult = { ...cached.result, fullDataUrl: rawDataUrl };
-        out.push({ file: file.name, thumbnail: cached.thumbnail, result: cachedResult, error: null, fromCache: true });
+      const item = await processOneFile(files[i], signal);
+      results.push(item);
+    }
+
+    if (overlay) overlay.style.display = 'none';
+
+    const autoSaved     = [];
+    const duplicates    = [];
+    const needAttention = [];
+
+    for (const item of results) {
+      if (item.error) { needAttention.push(item); continue; }
+      const r = item.result;
+
+      if (findExactDuplicate(r)) {
+        duplicates.push(item);
         continue;
       }
 
-      statusDesc.innerText = 'Xử lý ảnh...';
-      const thumbnail = await makeThumbnail(rawDataUrl, 96);
-
-      statusDesc.innerText = 'Xác định tab...';
-      const detectedType = await detectActiveTabByOrangeLine(rawDataUrl);
-
-      // Pass 1
-      statusDesc.innerText = 'Quét lần 1...';
-      const pre1 = await preprocessImage(rawDataUrl, { upscale: 2.0, useOtsu: true });
-      const text1 = await ocrRecognize(pre1.dataUrl);
-      const parsed1 = parseOcrText(text1);
-
-      let bestResult = parsed1;
-      let bestText = text1;
-      let bestDiff = parsed1.expectedTotal !== null ? Math.abs(parsed1.totalFound - parsed1.expectedTotal) : 9999;
-
-      // Pass 2
-      if (bestDiff > 0) {
-        statusDesc.innerText = 'Quét lần 2...';
-        const pre2 = await preprocessImage(rawDataUrl, { upscale: 2.0, useOtsu: false, threshold: 130 });
-        const text2 = await ocrRecognize(pre2.dataUrl);
-        const parsed2 = parseOcrText(text2);
-        const diff2 = parsed2.expectedTotal !== null ? Math.abs(parsed2.totalFound - parsed2.expectedTotal) : 9999;
-        if (diff2 < bestDiff) {
-          bestResult = parsed2;
-          bestText = text2;
-          bestDiff = diff2;
-        }
+      if (await tryAutoSave(r)) {
+        autoSaved.push(item);
+      } else {
+        needAttention.push(item);
       }
-
-      // Pass 3
-      if (bestDiff > 0) {
-        statusDesc.innerText = 'Quét lần 3...';
-        const pre3 = await preprocessImage(rawDataUrl, { upscale: 2.5, useOtsu: false, threshold: 160 });
-        const text3 = await ocrRecognize(pre3.dataUrl);
-        const parsed3 = parseOcrText(text3);
-        const diff3 = parsed3.expectedTotal !== null ? Math.abs(parsed3.totalFound - parsed3.expectedTotal) : 9999;
-        if (diff3 < bestDiff) {
-          bestResult = parsed3;
-          bestText = text3;
-          bestDiff = diff3;
-        }
-      }
-
-      const result = {
-        detectedColorType: detectedType || 'del',
-        parsedDate: extractDate(bestText),
-        weights: bestResult.weights,
-        confidences: bestResult.confidences,
-        expectedTotal: bestResult.expectedTotal,
-        totalFound: bestResult.totalFound,
-        fullDataUrl: rawDataUrl
-      };
-
-      out.push({ file: file.name, thumbnail, result, error: null });
-      cacheSet(hash, { thumbnail, result: { ...result, fullDataUrl: '' } });
-    } catch (err) {
-      console.error('[OCR]', file.name, err);
-      out.push({ file: file.name, thumbnail: '', result: null, error: err.message });
     }
+
+    if (needAttention.length > 0) {
+      if (wasAppend) {
+        batchResults.push(...needAttention);
+        renderBatchList();
+        document.getElementById('batchOcrModal').classList.add('active');
+        showSummaryToast(autoSaved.length, duplicates.length, needAttention.length);
+        return;
+      }
+
+      if (files.length === 1) {
+        const item = needAttention[0];
+        if (item.error) {
+          showToast('Không đọc được ảnh: ' + item.error, 'error', 3000);
+          return;
+        }
+        fillModalFromResult(item);
+        return;
+      }
+
+      batchResults = needAttention;
+      openBatchOcrModal();
+      showSummaryToast(autoSaved.length, duplicates.length, needAttention.length, 400);
+      return;
+    }
+
+    if (files.length === 1) {
+      const item = results[0];
+      const r = item.result;
+
+      if (duplicates.length === 1) {
+        showToast(
+          `Ảnh đã tồn tại — ${getTypeLabel(r)} ${formatDateDisplay(r.parsedDate)}: ${r.totalFound} đơn`,
+          'warning', 2500
+        );
+        return;
+      }
+
+      if (autoSaved.length === 1) {
+        showToast(
+          `Đã tự động lưu ${getTypeLabel(r)} ${formatDateDisplay(r.parsedDate)}: ${r.totalFound} đơn`,
+          'success', 2500
+        );
+      }
+      return;
+    }
+
+    if (autoSaved.length > 0 || duplicates.length > 0) {
+      showSummaryToast(autoSaved.length, duplicates.length, 0);
+    }
+  } catch (err) {
+    if (overlay) overlay.style.display = 'none';
+
+    if (err.message === 'OCR_CANCELLED') {
+      showToast('Đã hủy OCR', 'warning', 2000);
+      return;
+    }
+
+    console.error('[OCR] Pipeline error:', err);
+    showToast('Lỗi khi quét ảnh: ' + err.message, 'error', 3000);
+  } finally {
+    _clearAbortController(ctrl);
   }
-  return out;
+}
+
+// ==================== PROCESS ONE FILE — 6-PASS SMART PIPELINE ====================
+async function processOneFile(file, signal) {
+  _checkAborted(signal);
+
+  const hash = await hashBlob(file);
+  const cached = await cacheGetAsync(hash);
+
+  if (cached) {
+    _checkAborted(signal);
+    const rawDataUrl = await readFileAsDataURL(file);
+    const cachedResult = { ...cached.result, fullDataUrl: rawDataUrl };
+    return {
+      file: file.name,
+      thumbnail: cached.thumbnail,
+      result: cachedResult,
+      error: null,
+      fromCache: true
+    };
+  }
+
+  _checkAborted(signal);
+  const rawDataUrl = await readFileAsDataURL(file);
+
+  _checkAborted(signal);
+  const thumbnail = await makeThumbnail(rawDataUrl, 96);
+
+  _checkAborted(signal);
+  const detectedType = await detectActiveTabByOrangeLine(rawDataUrl);
+
+  _checkAborted(signal);
+  const statusDesc = document.getElementById('ocrStatusDesc');
+
+  let bestResult = null;
+  let bestText = '';
+  let bestDiff = 9999;
+  let knownTotal = null;   // 'Tổng' đọc được ở BẤT KỲ lần quét nào
+
+  async function runPass(label, opt) {
+    _checkAborted(signal);
+    if (statusDesc) statusDesc.innerText = `Quét ${label}...`;
+    const pre = await preprocessImage(rawDataUrl, opt, signal);
+    _checkAborted(signal);
+    const text = await ocrRecognize(pre.dataUrl, signal);
+    const parsed = parseOcrText(text);
+    if (parsed.expectedTotal === null && knownTotal !== null) parsed.expectedTotal = knownTotal;
+    if (parsed.expectedTotal !== null && knownTotal === null) knownTotal = parsed.expectedTotal;
+    const diff = parsed.expectedTotal !== null
+      ? Math.abs(parsed.totalFound - parsed.expectedTotal)
+      : 9999;
+    if (!bestResult || diff < bestDiff) {
+      bestResult = parsed;
+      bestText = text;
+      bestDiff = diff;
+    }
+    return diff;
+  }
+
+  // Pass 1: Otsu @ 2.0 — baseline
+  await runPass('1/6', { upscale: 2.0, useOtsu: true });
+
+  // Pass 2: Threshold 70 @ 2.0 — giữ nét đuôi 9
+  if (bestDiff > 0 && bestDiff !== 9999) {
+    await runPass('2/6', { upscale: 2.0, useOtsu: false, threshold: 70 });
+  }
+
+  // Pass 3: RAW @ 2.0
+  if (bestDiff > 0 && bestDiff !== 9999) {
+    await runPass('3/6', { upscale: 2.0, raw: true });
+  }
+
+  // Pass 4: RAW @ 1.5 — scale diversity
+  if (bestDiff > 0 && bestDiff !== 9999) {
+    await runPass('4/6', { upscale: 1.5, raw: true });
+  }
+
+  // Pass 5: Otsu @ 2.25 — scale diversity
+  if (bestDiff > 0 && bestDiff !== 9999) {
+    await runPass('5/6', { upscale: 2.25, useOtsu: true });
+  }
+
+  // Pass 6: Otsu @ 1.75 — scale diversity
+  if (bestDiff > 0 && bestDiff !== 9999) {
+    await runPass('6/6', { upscale: 1.75, useOtsu: true });
+  }
+
+  // Post-process: đoán chữ số nếu vẫn lệch
+  if (bestResult && bestDiff > 0) {
+    const fixed = postProcessFixDigits(bestResult);
+    if (fixed) { bestResult = fixed; bestDiff = 0; }
+  }
+
+  // Fallback nếu không pass nào chạy
+  if (!bestResult) {
+    const pre = await preprocessImage(rawDataUrl, { upscale: 2.0, useOtsu: true }, signal);
+    const text = await ocrRecognize(pre.dataUrl, signal);
+    bestResult = parseOcrText(text);
+    bestText = text;
+  }
+
+  const result = {
+    detectedColorType: detectedType || 'del',
+    tabDetected: !!detectedType,                       // false → 'del' chỉ là mặc định
+    dateFound: extractDateStrict(bestText) !== null,   // false → ngày chỉ là 'hôm nay' mặc định
+    parsedDate: extractDate(bestText),
+    weights: bestResult.weights,
+    confidences: bestResult.confidences,
+    expectedTotal: bestResult.expectedTotal,
+    totalFound: bestResult.totalFound,
+    mode: bestResult.mode,
+    rawText: bestText,
+    fullDataUrl: rawDataUrl,
+    fixInfo: bestResult.fixInfo || null
+  };
+
+  cacheSet(hash, {
+    thumbnail,
+    result: { ...result, fullDataUrl: '' }
+  });
+
+  return { file: file.name, thumbnail, result, error: null };
+}
+
+// ==================== FIX WARNING BANNER ====================
+function showFixWarning(fixInfo, detectedType) {
+  const old = document.getElementById('fixWarningBanner');
+  if (old) old.remove();
+
+  const labels = {
+    '0_2':'>0 - 2 kg', '2_4':'>2 - 4 kg', '4_6':'>4 - 6 kg', '6_8':'>6 - 8 kg',
+    '8_10':'>8 - 10 kg', '10_12':'>10 - 12 kg', '12_15':'>12 - 15 kg', 'over_15':'>15 kg'
+  };
+  const label = labels[fixInfo.key] || fixInfo.key;
+  const dir = fixInfo.delta > 0 ? 'tăng' : 'giảm';
+  const deltaAbs = Math.abs(fixInfo.delta);
+
+  const isHeavy = fixInfo.isRisky;
+
+  const banner = document.createElement('div');
+  banner.id = 'fixWarningBanner';
+  banner.style.cssText = `
+    margin-bottom: 14px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    border: 2px solid ${isHeavy ? '#dc2626' : '#ea580c'};
+    background: ${isHeavy ? '#fef2f2' : '#fff7ed'};
+    color: ${isHeavy ? '#991b1b' : '#9a3412'};
+    animation: fixPulse 1.4s ease-in-out 3;
+  `;
+  banner.innerHTML = `
+    <div style="font-size:13.5px;font-weight:800;margin-bottom:6px;letter-spacing:-0.01em">
+      ${isHeavy ? '🚨' : '⚠️'} App đã ĐOÁN LẠI SỐ
+    </div>
+    <div style="font-size:12.5px;line-height:1.55;font-weight:600">
+      Dải <b>${label}</b>: OCR đọc <b>${fixInfo.oldVal}</b> → app tự sửa thành <b>${fixInfo.newVal}</b>
+      (${dir} ${deltaAbs} đơn, ký tự ${fixInfo.from} → ${fixInfo.to})
+    </div>
+    <div style="font-size:11.5px;margin-top:8px;padding-top:8px;border-top:1px dashed ${isHeavy ? 'rgba(153,27,27,0.3)' : 'rgba(154,52,18,0.3)'};font-weight:700">
+      👉 <b>BẮT BUỘC</b> đối chiếu ảnh gốc bên dưới trước khi Lưu
+    </div>
+  `;
+
+  // Inject CSS animation (chỉ 1 lần)
+  if (!document.getElementById('fixWarningStyle')) {
+    const style = document.createElement('style');
+    style.id = 'fixWarningStyle';
+    style.textContent = `
+      @keyframes fixPulse {
+        0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(234, 88, 12, 0.4); }
+        50%      { transform: scale(1.015); box-shadow: 0 0 0 6px rgba(234, 88, 12, 0); }
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  const tabs = document.getElementById('modalSubTabGroup');
+  if (tabs && tabs.parentNode) {
+    tabs.parentNode.insertBefore(banner, tabs);
+  }
 }
 
 // ==================== FILL MODAL ====================
-export function fillModalFromResult(batchItem) {
-  const r = batchItem.result;
+export function fillModalFromResult(item) {
+  const r = item.result;
   state.lastOcrImageDataUrl = r.fullDataUrl || '';
   state.isOcrScan = true;
+
+  const distCheck = validateDistribution(r.weights);
+
+  const modeStr = r.mode ? `[mode: ${r.mode}]` : '';
+  const sumStr = r.expectedTotal !== null
+    ? `[Sum: ${r.totalFound} / Total: ${r.expectedTotal} — diff: ${Math.abs(r.expectedTotal - r.totalFound)}]`
+    : `[Sum: ${r.totalFound} / Total: (không đọc được)]`;
+  _lastOcrLog = `${modeStr}\n${sumStr}\n\n${r.rawText || '(không có text)'}`;
+
+  const debugEl = document.getElementById('ocrDebugText');
+  if (debugEl) {
+    debugEl.innerText = _lastOcrLog;
+    debugEl.style.display = 'none';
+  }
 
   openAddModal();
   document.getElementById('inputDate').value = r.parsedDate;
   switchModalSubTab(r.detectedColorType);
+
+  // Hiện banner cảnh báo nếu post-process đã fix số
+  if (r.fixInfo) {
+    showFixWarning(r.fixInfo, r.detectedColorType);
+  }
 
   const prefix = r.detectedColorType === 'del' ? 'del_inp'
                : r.detectedColorType === 'pick' ? 'pick_inp'
@@ -545,32 +1184,73 @@ export function fillModalFromResult(batchItem) {
 
   applyConfidenceHighlight(r.confidences, r.detectedColorType);
 
-  const typeText = r.detectedColorType === 'del'  ? 'Đã giao hàng'
-                 : r.detectedColorType === 'pick' ? 'Đã lấy'
-                 : 'Đã trả hàng';
+  setTimeout(() => injectCopyLogButton(), 100);
 
-  let warnMsg = '';
+  const typeText = getTypeLabel(r);
+  let msg = `${typeText} ${formatDateDisplay(r.parsedDate)} · ${r.totalFound} đơn`;
+
   if (r.expectedTotal !== null && r.totalFound !== r.expectedTotal) {
-    warnMsg = '\n\n⚠️ Ảnh ghi: ' + r.expectedTotal + ' đơn · Đọc được: ' + r.totalFound
-            + ' (lệch ' + Math.abs(r.expectedTotal - r.totalFound) + ')';
+    msg += ` · lệch ${Math.abs(r.expectedTotal - r.totalFound)}`;
   }
 
-  let lowCount = 0, midCount = 0, highCount = 0;
+  let lowCount = 0, midCount = 0;
   Object.values(r.confidences).forEach(c => {
     if (c == null) return;
-    if (c >= 85) highCount++;
-    else if (c >= 70) midCount++;
-    else lowCount++;
+    if (c < 70) lowCount++;
+    else if (c < 85) midCount++;
   });
-  let confMsg = '';
-  if (lowCount > 0)       confMsg = '\n\n🔴 ' + lowCount + ' dải cần kiểm tra (viền đỏ)';
-  else if (midCount > 0)  confMsg = '\n\n🟡 ' + midCount + ' dải nên xem lại (viền vàng)';
-  else if (highCount > 0) confMsg = '\n\n🟢 ' + highCount + ' dải đọc chắc chắn';
 
-  alert('✅ Quét xong!\n- Tab: ' + typeText
-      + '\n- Ngày: ' + formatDateDisplay(r.parsedDate)
-      + '\n- Tổng: ' + r.totalFound + ' đơn' + warnMsg + confMsg
-      + '\n\n📷 Kéo xuống xem ẢNH GỐC để đối chiếu.');
+  let toastType = 'success';
+  if (lowCount > 0) { msg += ' · có dải đỏ'; toastType = 'error'; }
+  else if (midCount > 0) { msg += ' · có dải vàng'; toastType = 'warning'; }
+  if (!distCheck.ok) { msg += ' · ⚠️ phân bố bất thường'; toastType = 'error'; }
+
+  // Nếu post-process fix → cảnh báo mạnh
+  if (r.fixInfo) {
+    msg += ' · 🔧 app đã sửa số';
+    toastType = 'error';
+  }
+
+  if (!distCheck.ok) {
+    showDistributionWarning(distCheck, r.detectedColorType);
+  }
+
+  showToast(msg + ' — kiểm tra và lưu', toastType, 3500);
+}
+
+// ==================== DISTRIBUTION WARNING ====================
+function showDistributionWarning(distCheck, detectedType) {
+  const old = document.getElementById('distWarningBanner');
+  if (old) old.remove();
+
+  const prefix = detectedType === 'del' ? 'del_inp'
+               : detectedType === 'pick' ? 'pick_inp' : 'ret_inp';
+
+  const suffixMap = {
+    '0_2':'0_2','2_4':'2_4','4_6':'4_6','6_8':'6_8',
+    '8_10':'8_10','10_12':'10_12','12_15':'12_15','over_15':'over_15'
+  };
+  distCheck.suspectKeys.forEach(k => {
+    const inp = document.getElementById(prefix + '_' + suffixMap[k]);
+    if (!inp) return;
+    inp.classList.add('conf-suspect');
+  });
+
+  const banner = document.createElement('div');
+  banner.id = 'distWarningBanner';
+  banner.className = 'dist-warning-banner';
+  banner.innerHTML = `
+    <div class="dist-warning-title">⚠️ Phân bố bất thường</div>
+    <ul class="dist-warning-list">
+      ${distCheck.warnings.map(w => `<li>${escapeHtml(w)}</li>`).join('')}
+    </ul>
+    <div class="dist-warning-hint">Đối chiếu với ảnh gốc bên dưới trước khi lưu</div>
+  `;
+
+  const tabs = document.getElementById('modalSubTabGroup');
+  if (tabs && tabs.parentNode) {
+    tabs.parentNode.insertBefore(banner, tabs);
+  }
 }
 
 // ==================== COMPARE ====================
@@ -600,9 +1280,11 @@ function buildCompareText(ocrW, existingW) {
 
 export function openCompareModal(batchItem, existingRecord) {
   const r = batchItem.result;
-  const type = r.detectedColorType === 'del'  ? 'delivery'
-             : r.detectedColorType === 'pick' ? 'pickup'
-             : 'return';
+  const type = getTypeFromResult(r);
+  if (!type) {
+    fillModalFromResult(batchItem);
+    return;
+  }
 
   openEditModal(type, existingRecord.id);
 
@@ -613,13 +1295,15 @@ export function openCompareModal(batchItem, existingRecord) {
       previewImg.src = r.fullDataUrl;
       previewBox.style.display = 'block';
     }
+    setTimeout(() => injectCopyLogButton(), 100);
+
     const cmp = buildCompareText(r.weights, existingRecord.weights);
     const dateStr = formatDateDisplay(r.parsedDate);
     let msg = `📊 SO SÁNH NGÀY ${dateStr}\n\n`;
     msg += `📁 Dữ liệu ĐÃ LƯU được hiển thị trong ô nhập.\n`;
     msg += `📷 Ảnh OCR được hiển thị bên dưới.\n\n`;
     msg += cmp.text;
-    alert(msg);
+    showAlert(msg, { title: 'So sánh dữ liệu', okText: 'Đóng' });
   }, 200);
 }
 
@@ -640,11 +1324,18 @@ function renderBatchList() {
   const list = document.getElementById('batchList');
   list.innerHTML = '';
   document.getElementById('batchCount').innerText = batchResults.length;
+
   if (batchResults.length === 0) {
     list.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-3);font-size:12px">Không có ảnh nào.</div>';
     return;
   }
-  const typeMap = { del: ['Giao', 'tag-delivery'], pick: ['Lấy', 'tag-pickup'], ret: ['Hoàn', 'tag-return'] };
+
+  const typeMap = {
+    del:  ['Giao', 'tag-delivery'],
+    pick: ['Lấy',  'tag-pickup'],
+    ret:  ['Hoàn', 'tag-return']
+  };
+
   batchResults.forEach((item, idx) => {
     const div = document.createElement('div');
     if (item.error) {
@@ -660,31 +1351,35 @@ function renderBatchList() {
         </div>`;
     } else {
       const r = item.result;
-      const [typeLabel, typeClass] = typeMap[r.detectedColorType];
+      const [typeLabel, typeClass] = typeMap[r.detectedColorType] || ['?', 'tag-delivery'];
       let lowCount = 0, midCount = 0;
       Object.values(r.confidences).forEach(c => {
         if (c == null) return;
         if (c < 70) lowCount++;
         else if (c < 85) midCount++;
       });
+      const distCheck = validateDistribution(r.weights);
       const confIcon  = lowCount > 0 ? ' 🔴' : midCount > 0 ? ' 🟡' : ' 🟢';
       const warnIcon  = (r.expectedTotal !== null && r.totalFound !== r.expectedTotal) ? ' ⚠️' : '';
+      const distIcon  = !distCheck.ok ? ' 🟠' : '';
+      const fixIcon   = r.fixInfo ? (r.fixInfo.isRisky ? ' 🚨' : ' 🔧') : '';
       const cacheIcon = item.fromCache ? ' ⚡' : '';
-      const type = r.detectedColorType === 'del' ? 'delivery' : r.detectedColorType === 'pick' ? 'pickup' : 'return';
-      const existing = state.appData[type].find(rec => rec.date === r.parsedDate);
+      const type = getTypeFromResult(r);
+      const existing = type ? state.appData[type].find(rec => rec.date === r.parsedDate) : null;
       const actionBtn = existing
         ? `<button class="batch-btn batch-btn-compare" onclick="importBatchItem(${idx})">🔍 So sánh</button>`
         : `<button class="batch-btn batch-btn-import" onclick="importBatchItem(${idx})">📝 Nhập</button>`;
       const existingBadge = existing
-        ? ` <span style="font-size:9px;padding:1px 6px;border-radius:4px;background:var(--warning-soft);border:1px solid var(--warning-border);color:var(--warning);font-weight:700">Đã có</span>`
+        ? ` <span style="font-size:9px;padding:1px 6px;border-radius:4px;background:var(--warning-bg);border:1px solid var(--warning-bd);color:var(--warning);font-weight:700">Đã có</span>`
         : '';
+      const thumbSrc = item.thumbnail || EMPTY_THUMB;
       div.className = 'batch-item';
       div.innerHTML = `
-        <img class="batch-thumb" src="${item.thumbnail}" alt="">
+        <img class="batch-thumb" src="${thumbSrc}" alt="">
         <div class="batch-info">
           <div class="batch-title">
             <span class="hist-badge-tag ${typeClass}">${typeLabel}</span>
-            <span>${formatDateDisplay(r.parsedDate)}${confIcon}${warnIcon}${cacheIcon}${existingBadge}</span>
+            <span>${formatDateDisplay(r.parsedDate)}${confIcon}${warnIcon}${distIcon}${fixIcon}${cacheIcon}${existingBadge}</span>
           </div>
           <div class="batch-meta">${escapeHtml(item.file)}</div>
           <div class="batch-total">${r.totalFound} đơn</div>
@@ -708,10 +1403,8 @@ export function importBatchItem(idx) {
   const item = batchResults[idx];
   if (!item || item.error) return;
   const r = item.result;
-  const type = r.detectedColorType === 'del'  ? 'delivery'
-             : r.detectedColorType === 'pick' ? 'pickup'
-             : 'return';
-  const existing = state.appData[type].find(rec => rec.date === r.parsedDate);
+  const type = getTypeFromResult(r);
+  const existing = type ? state.appData[type].find(rec => rec.date === r.parsedDate) : null;
   closeBatchOcrModal();
   if (existing) openCompareModal(item, existing);
   else fillModalFromResult(item);
@@ -720,7 +1413,7 @@ export function importBatchItem(idx) {
 
 export function backToBatch() {
   if (batchResults.length === 0) {
-    alert('Batch đã trống. Hãy quét ảnh mới.');
+    showToast('Batch đã trống', 'warning');
     showBackToBatchBtn(false);
     return;
   }
@@ -729,83 +1422,71 @@ export function backToBatch() {
   showBackToBatchBtn(false);
   openBatchOcrModal();
 }
+
 export function showBackToBatchBtn(show) {
   const btn = document.getElementById('backToBatchBtn');
   if (btn) btn.style.display = show ? 'inline-flex' : 'none';
 }
+
 export function hasBatchPending() { return batchResults.length > 0; }
 
 // ==================== SAVE BATCH ====================
-export function saveBatchAll() {
+export async function saveBatchAll() {
   const valid = batchResults.filter(r => !r.error);
-  if (valid.length === 0) { alert('Không có dữ liệu hợp lệ để lưu!'); return; }
-  const suffixMap = {
-    '0_2':'w0_2','2_4':'w2_4','4_6':'w4_6','6_8':'w6_8',
-    '8_10':'w8_10','10_12':'w10_12','12_15':'w12_15','over_15':'wover_15'
-  };
-  function buildWeights(r) {
-    const w = {};
-    WEIGHT_KEYS.forEach(wk => {
-      const suffix = Object.keys(suffixMap).find(k => suffixMap[k] === wk);
-      w[wk] = r.weights[suffix] || 0;
-    });
-    return w;
-  }
-  function getType(r) {
-    return r.detectedColorType === 'del' ? 'delivery'
-         : r.detectedColorType === 'pick' ? 'pickup' : 'return';
-  }
+  if (valid.length === 0) { showToast('Không có dữ liệu hợp lệ', 'error'); return; }
+
   const seenInBatch = new Set();
   const dedupedBatch = [];
   let dupInBatch = 0;
   valid.forEach(item => {
     const r = item.result;
-    const key = getType(r) + '|' + r.parsedDate;
+    const type = getTypeFromResult(r);
+    if (!type) { dupInBatch++; return; }
+    const key = type + '|' + r.parsedDate;
     if (seenInBatch.has(key)) { dupInBatch++; return; }
     seenInBatch.add(key);
     dedupedBatch.push(item);
   });
+
   const finalList = [];
   let dupExisting = 0;
+  let suspectSkipped = 0;
   dedupedBatch.forEach(item => {
     const r = item.result;
-    const type = getType(r);
+    const type = getTypeFromResult(r);
+    if (!type) { dupInBatch++; return; }
+
     const existing = state.appData[type].find(rec => rec.date === r.parsedDate);
     if (existing) { dupExisting++; return; }
+
+    const dist = validateDistribution(r.weights);
+    if (!dist.ok) { suspectSkipped++; return; }
+
     finalList.push({ item, type, weights: buildWeights(r) });
   });
-  const totalSkipped = dupInBatch + dupExisting;
+
+  const totalSkipped = dupInBatch + dupExisting + suspectSkipped;
+
   if (finalList.length === 0) {
-    let msg = '⚠️ Không có gì để lưu!\n';
-    if (dupInBatch > 0)  msg += `\n• ${dupInBatch} ảnh trùng trong batch`;
-    if (dupExisting > 0) msg += `\n• ${dupExisting} ảnh đã có ngày tồn tại trong Nhật ký`;
-    msg += '\n\n💡 Bấm "🔍 So sánh" để đối chiếu.';
-    alert(msg);
+    let msg = 'Không có gì để lưu';
+    if (totalSkipped > 0) msg += ` (bỏ qua ${totalSkipped} ảnh)`;
+    showToast(msg, 'warning', 2500);
     return;
   }
-  let confirmMsg = `Lưu ${finalList.length} bản ghi mới?`;
-  if (totalSkipped > 0) {
-    confirmMsg += `\n\n⚠️ Bỏ qua ${totalSkipped} ảnh:`;
-    if (dupInBatch > 0)  confirmMsg += `\n  • ${dupInBatch} ảnh trùng trong batch`;
-    if (dupExisting > 0) confirmMsg += `\n  • ${dupExisting} ảnh đã có ngày (giữ data cũ)`;
-  }
-  if (!confirm(confirmMsg)) return;
+
   finalList.forEach(({ item, type, weights }) => {
     state.appData[type].unshift({ id: generateId(), date: item.result.parsedDate, weights });
   });
+
   batchResults = [];
   showBackToBatchBtn(false);
   closeBatchOcrModal();
   updateAllViews();
-  let doneMsg = `✅ Đã lưu ${finalList.length} bản ghi!`;
-  if (totalSkipped > 0) doneMsg += `\n(Đã bỏ qua ${totalSkipped} ảnh)`;
-  alert(doneMsg);
-}
 
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, c => ({
-    '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'
-  }[c]));
+  let doneMsg = `Đã lưu ${finalList.length} bản ghi`;
+  if (totalSkipped > 0) doneMsg += ` (bỏ qua ${totalSkipped} ảnh)`;
+  if (suspectSkipped > 0) doneMsg += ` · ⚠️ ${suspectSkipped} nghi ngờ`;
+  showToast(doneMsg, 'success', 3000);
 }
 
 // ==================== HIGHLIGHT ====================
@@ -836,12 +1517,16 @@ export function applyConfidenceHighlight(confMap, detectedType) {
 }
 
 export function clearAllConfidenceHighlights() {
+  // Xóa banner fix (nếu có)
+  const fixBanner = document.getElementById('fixWarningBanner');
+  if (fixBanner) fixBanner.remove();
+
   const prefixes = ['del_inp', 'pick_inp', 'ret_inp'];
   const keys = ['0_2','2_4','4_6','6_8','8_10','10_12','12_15','over_15'];
   prefixes.forEach(pfx => keys.forEach(k => {
     const input = document.getElementById(pfx + '_' + k);
     if (!input) return;
-    input.classList.remove('conf-high', 'conf-mid', 'conf-low');
+    input.classList.remove('conf-high', 'conf-mid', 'conf-low', 'conf-suspect');
     const parent = input.closest('.weight-input-item');
     if (parent) {
       const badge = parent.querySelector('.conf-badge');
@@ -859,4 +1544,62 @@ export function openOcrLightbox() {
 }
 export function closeOcrLightbox() {
   document.getElementById('ocrLightbox').classList.remove('active');
+}
+
+// ==================== ENTRY: INPUT FILE ====================
+export async function handleOcrImage(event) {
+  const files = Array.from(event.target.files || []);
+  event.target.value = '';
+  if (files.length === 0) { pendingAppend = false; return; }
+
+  const wasAppend = pendingAppend;
+  pendingAppend = false;
+
+  await _runOcrFromFiles(files, wasAppend);
+}
+
+// ==================== ENTRY: SHARE TARGET ====================
+export async function handleSharedImage(sharedFiles) {
+  const arr = Array.from(sharedFiles || []);
+  if (arr.length === 0) {
+    showToast('Không nhận được ảnh từ chia sẻ', 'warning', 2500);
+    return;
+  }
+
+  const images = arr.filter(f => f && f.type && f.type.startsWith('image/'));
+  const skipped = arr.length - images.length;
+
+  if (images.length === 0) {
+    showToast(
+      skipped > 0 ? 'Chia sẻ không chứa ảnh — bỏ qua' : 'Không có file hợp lệ',
+      'error', 3000
+    );
+    return;
+  }
+
+  if (skipped > 0) {
+    showToast(`Bỏ qua ${skipped} mục không phải ảnh`, 'warning', 2000);
+  }
+
+  await _runOcrFromFiles(images, false);
+}
+
+// ==================== ESCAPE HTML ====================
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'
+  }[c]));
+}
+
+// ==================== INTERNAL: showSummaryToast ====================
+function showSummaryToast(saved, dup, need, delay = 0) {
+  const parts = [];
+  if (saved > 0) parts.push(`✅ ${saved} tự lưu`);
+  if (dup > 0)   parts.push(`⚠️ ${dup} trùng`);
+  if (need > 0)  parts.push(`📝 ${need} cần xử lý`);
+  if (parts.length === 0) return;
+
+  const msg = parts.join(' · ');
+  const type = need > 0 ? 'warning' : (dup > 0 ? 'warning' : 'success');
+  setTimeout(() => showToast(msg, type, 3500), delay);
 }

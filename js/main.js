@@ -46,15 +46,9 @@ import {
   testCloudConnection, pushToCloud, pullFromCloud,
   initCloudUI, clearCloudToken
 } from './cloud.js';
-import { undoLast } from './undo.js';
 import { showAlert, showConfirm } from './dialog.js';
 import { WEIGHT_KEYS } from './config.js';
 import { requestPrecacheTesseract } from './sw-bridge.js';
-// ⭐ MỚI: fee-table
-import {
-  openFeeTableModal, closeFeeTableModal, initFeeTable,
-  setFeeMode, setFeeType, clearFeeSearch
-} from './fee-table.js';
 
 // ================ AUTO-CLEAR INPUT ================
 function attachAutoClearInputs() {
@@ -67,8 +61,8 @@ function attachAutoClearInputs() {
 // ================ SAVE CONFIG THEO THÁNG ================
 let manualPointsTimer = null;
 function _saveManualPoints() {
-  const buuCuc = parseInt(document.getElementById('manualBuuCucInput').value, 10) || 0;
-  const taiXe  = parseInt(document.getElementById('manualTaiXeInput').value, 10) || 0;
+  const buuCuc = parseFloat(document.getElementById('manualBuuCucInput').value) || 0;
+  const taiXe  = parseFloat(document.getElementById('manualTaiXeInput').value) || 0;
   const cfg = getSalaryConfig(state.currentMonth);
   setSalaryConfig(state.currentMonth, { ...cfg, buuCuc, taiXe });
   clearTimeout(manualPointsTimer);
@@ -176,9 +170,11 @@ function _initHeroExpandState() {
 // ================ INFO ICON ================
 function _showIncomeInfo() {
   showAlert(
-    'Lương 1 công = (LCB + Bưu cục + Tài xế) / số ngày tối đa\n\n' +
-    '⚡ Tài xế CHỈ được cộng khi đơn Giao ≥ 1.500/tháng.\n' +
-    'Nếu < 1.500 → không cộng Tài xế vào lương.\n\n' +
+    'Lương 1 công = (LCB + KC Bưu cục + KC Tài xế) / số ngày tối đa\n\n' +
+    '📏 ĐƠN VỊ: ĐIỂM (không phải đồng)\n' +
+    '→ Tự quy đổi từ màn hình "Điểm tạm tính" của app SPX.\n\n' +
+    '⚡ KC Tài xế CHỈ được cộng khi đơn Giao ≥ 1.500/tháng.\n' +
+    'Nếu < 1.500 → không cộng KC Tài xế vào lương.\n\n' +
     'Đã tích lũy = Lương 1 công × số công\n\n' +
     'Quy đổi: Giao + Lấy/6 + Hoàn\n' +
     '• Miền Trung: ≥60 = 1 công, ≥30 = 0.5 công\n' +
@@ -477,13 +473,6 @@ Object.assign(window, {
   closeAllOpportunitiesModal,
   setAllOppFilter,
 
-  // ⭐ MỚI: fee-table
-  openFeeTableModal,
-  closeFeeTableModal,
-  setFeeMode,
-  setFeeType,
-  clearFeeSearch,
-
   openOcrPicker: _openOcrPicker,
 
   // REGION
@@ -526,14 +515,13 @@ Object.assign(window, {
   confirmImportJsonString, exportData, importData, restoreFromVault,
   downloadBackupFile,
   testCloudConnection, pushToCloud, pullFromCloud, initCloudUI, clearCloudToken,
-  undoLast,
 
   saveManualPoints: _saveManualPoints,
   saveSalaryConfig: _saveSalaryConfig,
 
   forceSaveConfig: function() {
-    const buuCuc = parseInt(document.getElementById('manualBuuCucInput').value, 10) || 0;
-    const taiXe  = parseInt(document.getElementById('manualTaiXeInput').value, 10) || 0;
+    const buuCuc = parseFloat(document.getElementById('manualBuuCucInput').value) || 0;
+    const taiXe  = parseFloat(document.getElementById('manualTaiXeInput').value) || 0;
     const salary = parseFloat(document.getElementById('salaryBaseInput').value) || 0;
 
     setSalaryConfig(state.currentMonth, { base: salary, buuCuc, taiXe });
@@ -545,15 +533,15 @@ Object.assign(window, {
 
     const [y, m] = state.currentMonth.split('-');
     const taiXeNote = taiXe > 0
-      ? `\n⚡ Tài xế chỉ được cộng khi đơn Giao ≥ 1.500/tháng.`
+      ? `\n⚡ KC Tài xế chỉ được cộng khi đơn Giao ≥ 1.500/tháng.`
       : '';
 
     showAlert(
       `Đã lưu cấu hình cho Tháng ${parseInt(m, 10)}/${y}!\n\n` +
-      `• Lương:   ${salary.toLocaleString('vi-VN')}\n` +
-      `• Bưu cục: ${buuCuc.toLocaleString('vi-VN')}\n` +
-      `• Tài xế:  ${taiXe.toLocaleString('vi-VN')}\n` +
-      `• Khu vực: ${state.region === 'hcm_hn' ? 'TP.HCM & HN' : 'Miền Trung'}` +
+      `• LCB:        ${salary.toLocaleString('vi-VN')} Điểm\n` +
+      `• KC Bưu cục: ${buuCuc.toLocaleString('vi-VN')} Điểm\n` +
+      `• KC Tài xế:  ${taiXe.toLocaleString('vi-VN')} Điểm\n` +
+      `• Khu vực:    ${state.region === 'hcm_hn' ? 'TP.HCM & HN' : 'Miền Trung'}` +
       taiXeNote,
       { title: 'Đã lưu cấu hình', okText: 'OK' }
     );
@@ -601,9 +589,6 @@ window.addEventListener('spx:storage-error', () => {
   updateAllViews();
 
   initOcrCache().catch(e => console.warn('[Init] OCR cache init fail:', e));
-
-  // ⭐ MỚI: khởi tạo fee-table (attach events 1 lần)
-  try { initFeeTable(); } catch (e) { console.warn('[Init] FeeTable init fail:', e); }
 
   registerSW();
   setTimeout(() => checkVersion(false), 2000);
