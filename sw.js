@@ -3,11 +3,11 @@
 // Cache: app shell (CACHE) + Tesseract (TESS_CACHE) + Share Target
 //
 // ⚠️ MỖI LẦN SỬA FILE TRONG CORE → BUMP CACHE VERSION
-//    - spx-tracker-v3 → spx-tracker-v4 → ...
+//    - spx-tracker-v1 → spx-tracker-v2 → ...
 //    - TESS_CACHE và SHARE_CACHE KHÔNG cần bump (dữ liệu không đổi)
 // =============================================================
 
-const CACHE       = 'spx-tracker-v5';     // ⭐ v23 — thêm fee-table.js
+const CACHE       = 'spx-tracker-v1';      // ⭐ v1 — bản đầu tiên sau khi bỏ undo + đổi KC
 const TESS_CACHE  = 'spx-tesseract-v1';    // giữ nguyên — Tesseract không đổi
 const SHARE_CACHE = 'spx-shared-files';    // giữ nguyên — dữ liệu tạm
 
@@ -33,9 +33,7 @@ const CORE = [
   './js/entry.js',
   './js/backup.js',
   './js/cloud.js',
-  './js/undo.js',
-  './js/dialog.js',
-  './js/fee-table.js'      // ⭐ v23: file mới — bảng phí dịch vụ
+  './js/dialog.js'
 ];
 
 // ==================== TESSERACT RUNTIME URLs ====================
