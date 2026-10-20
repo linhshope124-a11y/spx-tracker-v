@@ -4,13 +4,25 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="theme-color" content="#f8fafc">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#ff5722">
+<meta name="spx-app-version" content="v2.3">
 <meta name="description" content="Theo dõi sản lượng giao/lấy/hoàn và tính điểm SPX">
 <title>Theo Dõi Sản Lượng & Điểm SPX</title>
 <link rel="manifest" href="./manifest.json">
 <link rel="apple-touch-icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxOTIgMTkyIj48cmVjdCB3aWR0aD0iMTkyIiBoZWlnaHQ9IjE5MiIgcng9IjM4IiBmaWxsPSIjZmY1NzIyIi8+PHRleHQgeD0iOTYiIHk9IjExNSIgZm9udC1zaXplPSI4OCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmaWxsPSIjZmZmIiBmb250LXdlaWdodD0iYm9sZCI+U1BYPC90ZXh0Pjwvc3ZnPg==">
 <meta name="apple-mobile-web-app-title" content="SPX Tracker">
+<script>
+  // Aplica o tema antes de pintar a tela para evitar o flash do tema claro.
+  (function () {
+    try {
+      var theme = localStorage.getItem('spx_theme') || localStorage.getItem('theme') || 'light';
+      document.documentElement.setAttribute('data-theme', theme === 'dark' ? 'dark' : 'light');
+    } catch (_) {
+      document.documentElement.setAttribute('data-theme', 'light');
+    }
+  })();
+</script>
 <link rel="stylesheet" href="./css/style.css">
 </head>
 <body>
@@ -221,7 +233,7 @@
             <div class="taixe-condition-banner" id="taixeConditionBanner" style="display:none">
               <div class="taixe-banner-head">
                 <span class="taixe-banner-icon" id="taixeBannerIcon">⚠️</span>
-                <span class="taixe-banner-title" id="taixeBannerTitle">Chưa đủ điều kiện cộng KC Tài xế</span>
+                <span class="taixe-banner-title" id="taixeBannerTitle">Chưa đủ điều kiện cộng Tài xế</span>
               </div>
               <div class="taixe-banner-progress-text" id="taixeProgressText">
                 Đơn Giao: 388/1,500
@@ -264,7 +276,7 @@
 
       </main>
     </div>
-
+    
     <div class="tab-panel" id="tab-delivery">
       <main class="app-container">
         <section class="hero hero-sm hero-giao">
@@ -274,7 +286,33 @@
           </div>
           <div class="hero-value" id="delTotalPoints">0 <span class="hero-value-unit">Điểm</span></div>
         </section>
-        <section class="card card-flush">
+
+        <section class="tab-empty-state" id="delEmptyState" style="display:none">
+          <div class="tab-empty-icon">📦</div>
+          <div class="tab-empty-title">Chưa có dữ liệu Giao</div>
+          <div class="tab-empty-sub">Quét ảnh hoặc nhập tay để bắt đầu theo dõi</div>
+          <div class="tab-empty-cta">
+            <button type="button" class="btn-cta-ocr" onclick="openOcrPicker()">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 7V5a2 2 0 0 1 2-2h2"/>
+                <path d="M17 3h2a2 2 0 0 1 2 2v2"/>
+                <path d="M21 17v2a2 2 0 0 1-2 2h-2"/>
+                <path d="M7 21H5a2 2 0 0 1-2-2v-2"/>
+                <circle cx="12" cy="12" r="3"/>
+              </svg>
+              <span>Quét ảnh</span>
+            </button>
+            <button type="button" class="btn-cta-manual" onclick="openAddModal()">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 20h9"/>
+                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+              </svg>
+              <span>Nhập tay</span>
+            </button>
+          </div>
+        </section>
+
+        <section class="card card-flush" id="delTableCard">
           <div class="card-head-pad">
             <h2 class="card-title">Phân bổ & mục tiêu</h2>
           </div>
@@ -306,7 +344,33 @@
           </div>
           <div class="hero-value" id="pickTotalPoints">0 <span class="hero-value-unit">Điểm</span></div>
         </section>
-        <section class="card card-flush">
+
+        <section class="tab-empty-state" id="pickEmptyState" style="display:none">
+          <div class="tab-empty-icon">📥</div>
+          <div class="tab-empty-title">Chưa có dữ liệu Lấy</div>
+          <div class="tab-empty-sub">Quét ảnh hoặc nhập tay để bắt đầu theo dõi</div>
+          <div class="tab-empty-cta">
+            <button type="button" class="btn-cta-ocr" onclick="openOcrPicker()">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 7V5a2 2 0 0 1 2-2h2"/>
+                <path d="M17 3h2a2 2 0 0 1 2 2v2"/>
+                <path d="M21 17v2a2 2 0 0 1-2 2h-2"/>
+                <path d="M7 21H5a2 2 0 0 1-2-2v-2"/>
+                <circle cx="12" cy="12" r="3"/>
+              </svg>
+              <span>Quét ảnh</span>
+            </button>
+            <button type="button" class="btn-cta-manual" onclick="openAddModal()">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 20h9"/>
+                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+              </svg>
+              <span>Nhập tay</span>
+            </button>
+          </div>
+        </section>
+
+        <section class="card card-flush" id="pickTableCard">
           <div class="card-head-pad">
             <h2 class="card-title">Phân bổ & mục tiêu</h2>
           </div>
@@ -338,7 +402,33 @@
           </div>
           <div class="hero-value" id="retTotalPoints">0 <span class="hero-value-unit">Điểm</span></div>
         </section>
-        <section class="card card-flush">
+
+        <section class="tab-empty-state" id="retEmptyState" style="display:none">
+          <div class="tab-empty-icon">↩️</div>
+          <div class="tab-empty-title">Chưa có dữ liệu Hoàn</div>
+          <div class="tab-empty-sub">Quét ảnh hoặc nhập tay để bắt đầu theo dõi</div>
+          <div class="tab-empty-cta">
+            <button type="button" class="btn-cta-ocr" onclick="openOcrPicker()">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 7V5a2 2 0 0 1 2-2h2"/>
+                <path d="M17 3h2a2 2 0 0 1 2 2v2"/>
+                <path d="M21 17v2a2 2 0 0 1-2 2h-2"/>
+                <path d="M7 21H5a2 2 0 0 1-2-2v-2"/>
+                <circle cx="12" cy="12" r="3"/>
+              </svg>
+              <span>Quét ảnh</span>
+            </button>
+            <button type="button" class="btn-cta-manual" onclick="openAddModal()">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 20h9"/>
+                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+              </svg>
+              <span>Nhập tay</span>
+            </button>
+          </div>
+        </section>
+
+        <section class="card card-flush" id="retTableCard">
           <div class="card-head-pad">
             <h2 class="card-title">Phân bổ & mục tiêu</h2>
           </div>
@@ -378,7 +468,21 @@
             <button class="filter-btn filter-btn-date" id="histFilterDateBtn" onclick="openHistoryDatePicker()">📅 Ngày</button>
           </div>
 
+          <!-- Banner: số ngày trong tháng chưa có bản ghi (ẩn khi đang lọc theo 1 ngày hoặc không có ngày sót) -->
+          <div id="missedDaysBanner" class="missed-days-banner" style="display:none;">
+            <div class="missed-days-content">
+              <span class="missed-days-icon">⚠️</span>
+              <span id="missedDaysText" class="missed-days-text">Chưa cập nhật</span>
+            </div>
+            <button type="button" class="btn" onclick="openAddModal()" style="padding: 6px 12px; font-size: 11.5px; white-space: nowrap; border:1px solid var(--warning); background:var(--warning); color:#fff;">+ Nhập bù</button>
+          </div>
+
           <div id="historyEntries"></div>
+
+          <!-- Xóa toàn bộ dữ liệu của tháng đang xem (nhãn tháng được render.js cập nhật) -->
+          <button type="button" class="btn-delete-month" id="btnDeleteMonth" onclick="deleteCurrentMonthHistory()">
+            🗑️ Xóa dữ liệu tháng này
+          </button>
         </section>
       </main>
     </div>
@@ -442,7 +546,7 @@
 <input type="date" id="historyDatePickerInput" style="display:none" onchange="applyHistoryDateFilter(this.value)">
 
 <div class="modal-shade" id="menuModal" onclick="if(event.target===this)closeMenuModal()">
-  <div class="modal-box menu-modal-box">
+  <div class="modal-box menu-modal-box" role="dialog" aria-modal="true" aria-label="Menu">
     <div class="modal-box-head">
       <h3>Menu</h3>
       <button class="modal-close-btn" onclick="closeMenuModal()" aria-label="Đóng">
@@ -568,7 +672,7 @@
 </div>
 
 <div class="modal-shade" id="entryModal">
-  <div class="modal-box">
+  <div class="modal-box" role="dialog" aria-modal="true" aria-label="Hộp thoại">
     <div class="modal-box-head">
       <button class="modal-back-btn" id="backToBatchBtn" onclick="backToBatch()" style="display:none">← Quay lại</button>
       <h3 id="modalTitle" style="flex:1;text-align:center;">Nhập sản lượng ngày</h3>
@@ -647,7 +751,7 @@
 </div>
 
 <div class="modal-shade" id="batchOcrModal">
-  <div class="modal-box">
+  <div class="modal-box" role="dialog" aria-modal="true" aria-label="Hộp thoại">
     <div class="modal-box-head">
       <h3>Kết quả quét (<span id="batchCount">0</span>)</h3>
       <button class="modal-close-btn" onclick="closeBatchOcrModal()" aria-label="Đóng">
@@ -658,6 +762,25 @@
       </button>
     </div>
     <div class="modal-body">
+
+      <div class="batch-summary" id="batchSummary" style="display:none">
+        <div class="batch-summary-chip batch-summary-saved" id="batchSummarySaved" style="display:none">
+          <span class="batch-summary-icon">✅</span>
+          <span class="batch-summary-count" id="batchSummarySavedCount">0</span>
+          <span class="batch-summary-label">tự lưu</span>
+        </div>
+        <div class="batch-summary-chip batch-summary-dup" id="batchSummaryDup" style="display:none">
+          <span class="batch-summary-icon">⚠️</span>
+          <span class="batch-summary-count" id="batchSummaryDupCount">0</span>
+          <span class="batch-summary-label">trùng</span>
+        </div>
+        <div class="batch-summary-chip batch-summary-need" id="batchSummaryNeed" style="display:none">
+          <span class="batch-summary-icon">📝</span>
+          <span class="batch-summary-count" id="batchSummaryNeedCount">0</span>
+          <span class="batch-summary-label">cần xử lý</span>
+        </div>
+      </div>
+
       <div id="batchList"></div>
     </div>
     <div class="modal-box-foot" style="justify-content:space-between;flex-wrap:wrap;gap:6px">
@@ -671,7 +794,7 @@
 </div>
 
 <div class="modal-shade" id="settingsModal" onclick="if(event.target===this)closeSettingsModal()">
-  <div class="modal-box">
+  <div class="modal-box" role="dialog" aria-modal="true" aria-label="Hộp thoại">
     <div class="modal-box-head">
       <h3>Backup & Quản lý</h3>
       <button class="modal-close-btn" onclick="closeSettingsModal()" aria-label="Đóng">
@@ -762,8 +885,8 @@
       <ol class="settings-guide">
         <li>Vào <b>github.com/settings/tokens</b></li>
         <li>Bấm <b>Generate new token (classic)</b></li>
-        <li>Note: <code>spx-backup</code> · Expiration: <code>No expiration</code></li>
-        <li>Scope: tích <b>gist</b> · Bấm <b>Generate</b></li>
+        <li>Note: <code>spx-backup</code> · Expiration: <code>90 days (khuyến nghị)</code></li>
+        <li>Chỉ cấp quyền <code>gist</code>; nên đặt hạn dùng 90 ngày, không chọn token vô thời hạn.</li>
         <li>Copy token → paste vào ô trên</li>
       </ol>
     </div>
@@ -774,7 +897,7 @@
 </div>
 
 <div class="modal-shade" id="pasteJsonModal" onclick="if(event.target===this)closePasteJsonModal()">
-  <div class="modal-box coffee-modal-box">
+  <div class="modal-box coffee-modal-box" role="dialog" aria-modal="true" aria-label="Hộp thoại">
     <div class="modal-box-head">
       <h3>Dán chuỗi JSON</h3>
       <button class="modal-close-btn" onclick="closePasteJsonModal()" aria-label="Đóng">
@@ -796,7 +919,7 @@
 </div>
 
 <div class="modal-shade" id="coffeeModal" onclick="if(event.target===this)closeCoffeeModal()">
-  <div class="modal-box coffee-modal-box">
+  <div class="modal-box coffee-modal-box" role="dialog" aria-modal="true" aria-label="Hộp thoại">
     <div class="modal-box-head">
       <h3>Ủng hộ tác giả</h3>
       <button class="modal-close-btn" onclick="closeCoffeeModal()" aria-label="Đóng">
@@ -829,7 +952,7 @@
 </div>
 
 <div class="modal-shade" id="shareTargetModal" onclick="if(event.target===this)closeShareTargetModal()">
-  <div class="modal-box">
+  <div class="modal-box" role="dialog" aria-modal="true" aria-label="Hộp thoại">
     <div class="modal-box-head">
       <h3>📤 Chia sẻ ảnh vào app</h3>
       <button class="modal-close-btn" onclick="closeShareTargetModal()" aria-label="Đóng">
@@ -892,7 +1015,7 @@
 </div>
 
 <div class="modal-shade" id="allOpportunitiesModal" onclick="if(event.target===this)closeAllOpportunitiesModal()">
-  <div class="modal-box">
+  <div class="modal-box" role="dialog" aria-modal="true" aria-label="Hộp thoại">
     <div class="modal-box-head">
       <h3>Cơ hội tăng điểm</h3>
       <button class="modal-close-btn" onclick="closeAllOpportunitiesModal()" aria-label="Đóng">
@@ -920,6 +1043,12 @@
   <div class="spinner"></div>
   <div class="ocr-title" id="ocrStatusTitle">Đang quét ảnh...</div>
   <div class="ocr-desc" id="ocrStatusDesc">Vui lòng chờ trong giây lát</div>
+  <div class="ocr-progress-wrap">
+    <div class="ocr-progress-bar">
+      <div class="ocr-progress-fill" id="ocrProgressFill"></div>
+    </div>
+    <div class="ocr-progress-text" id="ocrProgressText">0%</div>
+  </div>
 </div>
 
 <div id="ocrLightbox" onclick="closeOcrLightbox()">

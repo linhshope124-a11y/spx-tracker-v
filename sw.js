@@ -3,11 +3,11 @@
 // Cache: app shell (CACHE) + Tesseract (TESS_CACHE) + Share Target
 //
 // ⚠️ MỖI LẦN SỬA FILE TRONG CORE → BUMP CACHE VERSION
-//    - spx-tracker-v1 → spx-tracker-v2 → ...
+//    - spx-tracker-v2 → spx-tracker-v2.1 → ... → spx-tracker-v2.3   (tests/repo.test.mjs kiểm tra khớp với version.json)
 //    - TESS_CACHE và SHARE_CACHE KHÔNG cần bump (dữ liệu không đổi)
 // =============================================================
 
-const CACHE       = 'spx-tracker-v1';      // ⭐ v1 — bản đầu tiên sau khi bỏ undo + đổi KC
+const CACHE       = 'spx-tracker-v2.3';    // v2.3 (đồng bộ version.json)
 const TESS_CACHE  = 'spx-tesseract-v1';    // giữ nguyên — Tesseract không đổi
 const SHARE_CACHE = 'spx-shared-files';    // giữ nguyên — dữ liệu tạm
 
@@ -18,6 +18,8 @@ const CORE = [
   './manifest.json',
   './icons/icon-192.png',
   './icons/icon-512.png',
+  './icons/icon-maskable-192.png',
+  './icons/icon-maskable-512.png',
   './css/style.css',
   './js/main.js',
   './js/config.js',
@@ -33,17 +35,22 @@ const CORE = [
   './js/entry.js',
   './js/backup.js',
   './js/cloud.js',
+  './js/error-handler.js',   // ⭐ Phase 4 — thay cho undo.js đã xóa
   './js/dialog.js'
 ];
 
 // ==================== TESSERACT RUNTIME URLs ====================
-// Khi user bấm 📷 lần đầu, 3 URL này được precache.
-// Lần sau OCR chạy được cả khi offline.
+// Chỉ precache thư viện chính + dữ liệu tiếng Việt khi user bấm 📷 lần đầu.
+// Worker + core KHÔNG precache theo URL cố định: Tesseract tự gọi URL có phiên bản đầy đủ
+// (vd tesseract.js@v5.x.x/...) nên URL "@5" cố định sẽ không bao giờ khớp. Thay vào đó mọi URL
+// thuộc TESS_URL_PREFIXES được cache lúc chạy (lần OCR online đầu tiên) → các lần sau chạy offline.
 const TESS_RUNTIME_URLS = [
-  'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js',
-  'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
-  'https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core-simd.wasm.js',
+  'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js',   // phải trùng TESSERACT_LIB_URL trong ocr.js
   'https://tessdata.projectnaptha.com/4.0.0/vie.traineddata.gz'
+];
+const TESS_URL_PREFIXES = [
+  'https://cdn.jsdelivr.net/npm/tesseract.js',   // gồm cả tesseract.js@… và tesseract.js-core@…
+  'https://tessdata.projectnaptha.com/'
 ];
 
 // ==================== INSTALL ====================
@@ -165,7 +172,7 @@ function _isStaticAsset(pathname) {
 }
 
 function _isTesseractUrl(url) {
-  return TESS_RUNTIME_URLS.some(u => url.startsWith(u.split('?')[0]));
+  return TESS_URL_PREFIXES.some(p => url.startsWith(p));
 }
 
 // ==================== FETCH ====================
@@ -191,8 +198,11 @@ self.addEventListener('fetch', e => {
         const cached = await cache.match(req.url);
         if (cached) return cached;
         try {
-          const res = await fetch(req);
-          if (res && res.status === 200 && res.type !== 'opaque') {
+          // importScripts() trong worker gửi request kiểu no-cors → phản hồi 'opaque' (không cache được).
+          // Gọi lại bằng CORS (jsdelivr / tessdata đều cho phép) để có phản hồi cache được,
+          // rồi trả chính phản hồi đó cho trang — dùng được cho cả request no-cors.
+          const res = await fetch(req.url, { mode: 'cors', credentials: 'omit' });
+          if (res && res.status === 200) {
             cache.put(req.url, res.clone()).catch(() => {});
           }
           return res;
