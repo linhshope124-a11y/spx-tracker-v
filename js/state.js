@@ -6,7 +6,6 @@ export const state = {
 
   // Lương theo tháng
   salaryByMonth: {},
-  salaryDays: 26,
 
   // Hạng thưởng theo tháng
   rankByMonth: {},
@@ -269,9 +268,10 @@ export function loadState() {
     return:   sanitizeRecords(d.return)
   };
 
-  // 2. Period mode
-  const savedMode = safeParseString('spx_period_mode', 'month');
-  state.periodMode = (savedMode === 'day' || savedMode === 'month') ? savedMode : 'month';
+  // 2. Period mode — chế độ "ngày" đã bỏ khỏi UI; ép về 'month' để máy còn giá trị 'day'
+  //    từ bản cũ không bị kẹt ở chế độ lọc theo ngày mà không có nút để thoát.
+  state.periodMode = 'month';
+  try { localStorage.setItem('spx_period_mode', 'month'); } catch {}
 
   // 3. currentMonth — validate format
   const savedMonth = safeParseString('spx_current_month', '');
@@ -289,8 +289,7 @@ export function loadState() {
     state.currentDate = getTodayIso();
   }
 
-  // 5. Salary config
-  state.salaryDays = 26;
+  // 5. Salary config (số công được derive từ tháng trong render.js — không lưu state nữa)
   loadSalaryByMonth();
 
   // 6. Rank config
@@ -309,6 +308,7 @@ export function persistData() {
   let json;
   try { json = JSON.stringify(state.appData); } catch { return false; }
   if (json === _lastSerialized) return false;
+  // Lần ghi đầu tiên sau khi mở app trả về false (cố ý): mở app không được kích hoạt auto-backup Cloud.
   const first = _lastSerialized === null;
   try {
     localStorage.setItem(STORAGE_KEYS.records, json);

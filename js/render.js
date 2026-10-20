@@ -1,5 +1,5 @@
 import { state, persistData, getSalaryConfig, hasSalaryConfig, getRankConfig } from './state.js';
-import { WEIGHT_LABELS, WEIGHT_KEYS, TABLE_4_DATA, TABLE_5_DATA, TABLE_6_DATA } from './config.js';
+import { WEIGHT_LABELS, WEIGHT_KEYS, TABLE_4_DATA, TABLE_5_DATA, TABLE_6_DATA, TAIXE_ORDER_THRESHOLD } from './config.js';
 import { lookupTier, aggregateWeights, isDateInCurrentPeriod } from './calc.js';
 import { formatPts, formatDateDisplay, _fmt, getCurrentMonthIso, getTodayIso } from './utils.js';
 
@@ -124,6 +124,37 @@ function formatMissedDate(iso) {
   return `${p[2]}/${p[1]}`;
 }
 
+// ==================== NGÀY CHƯA CẬP NHẬT (tab Nhật ký) ====================
+/**
+ * Số ngày CHƯA có bản ghi nào (Giao/Lấy/Hoàn) trong tháng đang xem.
+ * - Tháng hiện tại: tính đến HÔM QUA (khớp banner nhắc ở Tổng quan; hôm nay ca làm chưa xong nên chưa tính).
+ * - Tháng đã qua: cả tháng.
+ * - Tháng tương lai, hoặc tháng chưa có bản ghi nào: 0 (không báo cho tháng chưa dùng app).
+ * Ngày nghỉ cũng bị tính là "chưa cập nhật" vì app không biết lịch nghỉ.
+ * @param {Date} [now] — chỉ để test
+ */
+export function getMissedDaysInCurrentMonth(now = new Date()) {
+  const cm = state.currentMonth || getCurrentMonthIso();
+  const [y, m] = cm.split('-').map(Number);
+  const nowMonthIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  if (cm > nowMonthIso) return 0;
+
+  const recorded = new Set();
+  ['delivery', 'pickup', 'return'].forEach(type => {
+    state.appData[type].forEach(r => {
+      if (r.date.startsWith(cm + '-')) recorded.add(r.date);
+    });
+  });
+  if (recorded.size === 0) return 0;
+
+  const endDay = (cm === nowMonthIso) ? now.getDate() - 1 : new Date(y, m, 0).getDate();
+  let missed = 0;
+  for (let d = 1; d <= endDay; d++) {
+    if (!recorded.has(`${cm}-${String(d).padStart(2, '0')}`)) missed++;
+  }
+  return missed;
+}
+
 export function renderReminderBanner() {
   const banner = document.getElementById('reminderBanner');
   if (!banner) return;
@@ -232,16 +263,7 @@ function updateHeroContextLabel() {
   el.innerText = `Tháng ${parseInt(m, 10)}/${y}`;
 }
 
-// ==================== KC TÀI XẾ CONDITION BANNER ====================
-const TAIXE_ORDER_THRESHOLD = 1500;
-
-// Format số thập phân gọn: 92.3 → "92,3", 923 → "923", 5000 → "5.000"
-function _fmtSmart(n) {
-  const num = Number(n) || 0;
-  if (Number.isInteger(num)) return _fmt(num);
-  return num.toLocaleString('vi-VN', { maximumFractionDigits: 2 });
-}
-
+// ==================== TÀI XẾ CONDITION BANNER ====================
 function renderTaiXeConditionBanner(delOrders, taiXeAmount) {
   const banner = document.getElementById('taixeConditionBanner');
   if (!banner) return;
@@ -267,8 +289,8 @@ function renderTaiXeConditionBanner(delOrders, taiXeAmount) {
 
   if (icon) icon.innerText = isMet ? '✅' : '⚠️';
   if (title) title.innerText = isMet
-    ? 'Đã đủ điều kiện cộng KC Tài xế'
-    : 'Chưa đủ điều kiện cộng KC Tài xế';
+    ? 'Đã đủ điều kiện cộng Tài xế'
+    : 'Chưa đủ điều kiện cộng Tài xế';
 
   if (progressText) {
     progressText.innerText = `Đơn Giao: ${_fmt(orders)}/${_fmt(TAIXE_ORDER_THRESHOLD)}`;
@@ -278,17 +300,16 @@ function renderTaiXeConditionBanner(delOrders, taiXeAmount) {
   }
   if (sub) {
     if (isMet) {
-      sub.innerText = `${pctStr}% — sẽ cộng ${_fmtSmart(amt)} Điểm vào lương tháng này`;
+      sub.innerText = `${pctStr}% — sẽ cộng ${_fmt(amt)}đ vào lương tháng này`;
     } else {
       const missing = TAIXE_ORDER_THRESHOLD - orders;
-      sub.innerText = `Còn thiếu ${_fmt(missing)} đơn — chưa cộng KC Tài xế`;
+      sub.innerText = `Còn thiếu ${_fmt(missing)} đơn — chưa cộng Tài xế`;
     }
   }
 
   banner.style.display = 'block';
 }
-// ==================== /KC TÀI XẾ CONDITION BANNER ====================
-
+// ==================== /TÀI XẾ CONDITION BANNER ====================
 
 // ==================== RENDER ROWS & SUGGESTIONS ====================
 function renderRow(weightLabel, orders, tier, typeClass) {
@@ -407,6 +428,28 @@ export function getAllOppFilter() {
 }
 
 
+// ==================== TAB EMPTY STATES ====================
+/**
+ * Toggle empty state cho 3 tab Giao/Lấy/Hoàn.
+ * - Nếu 1 loại có 0 bản ghi trong period hiện tại → hiện empty state, ẩn table card.
+ * - Nếu có ≥1 bản ghi → ẩn empty state, hiện table card.
+ */
+function _renderTabEmptyStates(agg) {
+  const configs = [
+    { emptyId: 'delEmptyState',  cardId: 'delTableCard',  hasData: agg.del.some(v => v > 0) },
+    { emptyId: 'pickEmptyState', cardId: 'pickTableCard', hasData: agg.pick.some(v => v > 0) },
+    { emptyId: 'retEmptyState',  cardId: 'retTableCard',  hasData: agg.ret.some(v => v > 0) }
+  ];
+
+  configs.forEach(({ emptyId, cardId, hasData }) => {
+    const emptyEl = document.getElementById(emptyId);
+    const cardEl  = document.getElementById(cardId);
+    if (emptyEl) emptyEl.style.display = hasData ? 'none'  : 'block';
+    if (cardEl)  cardEl.style.display  = hasData ? 'block' : 'none';
+  });
+}
+
+
 // ==================== UPDATE ALL VIEWS ====================
 function _updateAllViews() {
   const { agg, total } = aggregateWeights(
@@ -445,6 +488,9 @@ function _updateAllViews() {
   }
 
   delTbody.innerHTML = dRows; pickTbody.innerHTML = pRows; retTbody.innerHTML = rRows;
+
+  // ⭐ Toggle empty state cho 3 tab Giao/Lấy/Hoàn
+  _renderTabEmptyStates(agg);
 
   // Sort 3 tầng
   ovSuggBuf.sort((a, b) => {
@@ -561,7 +607,6 @@ function _updateAllViews() {
   const incomeTotalInner = document.getElementById('incomeTotalDisplayInner');
   const progressFill   = document.getElementById('incomeProgressFill');
 
-  // Chỉ ghi đè value khi input KHÔNG đang được focus (tránh nhảy con trỏ giữa lúc user gõ)
   if (salaryBaseEl && document.activeElement !== salaryBaseEl) salaryBaseEl.value = salaryBase;
   if (buuCucInput && document.activeElement !== buuCucInput)   buuCucInput.value  = manualBuuCuc;
   if (taiXeInput  && document.activeElement !== taiXeInput)    taiXeInput.value   = manualTaiXe;
@@ -636,6 +681,24 @@ export function renderHistory() {
   if (dateBtn) {
     const f = getHistFilters();
     dateBtn.classList.toggle('active', !!f.date);
+  }
+
+  // Banner "chưa cập nhật N ngày" (ẩn khi đang xem chi tiết 1 ngày) + nhãn nút xóa tháng
+  const missedBanner = document.getElementById('missedDaysBanner');
+  const missedText = document.getElementById('missedDaysText');
+  if (missedBanner && missedText) {
+    const missedCount = getHistFilters().date ? 0 : getMissedDaysInCurrentMonth();
+    if (missedCount > 0) {
+      missedText.innerHTML = `Chưa cập nhật <b>${missedCount} ngày</b>`;
+      missedBanner.style.display = 'flex';
+    } else {
+      missedBanner.style.display = 'none';
+    }
+  }
+  const btnDeleteMonth = document.getElementById('btnDeleteMonth');
+  if (btnDeleteMonth) {
+    const [by, bm] = (state.currentMonth || getCurrentMonthIso()).split('-');
+    btnDeleteMonth.textContent = `🗑️ Xóa dữ liệu tháng ${parseInt(bm, 10)}/${by}`;
   }
 
   let list = [];

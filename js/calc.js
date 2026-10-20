@@ -2,7 +2,8 @@ import { TABLE_4_DATA, TABLE_5_DATA, TABLE_6_DATA, WEIGHT_KEYS } from './config.
 import { getCurrentMonthIso, getTodayIso } from './utils.js';
 
 export function lookupTier(orders, colIdx, tableData) {
-  if (orders === 0) {
+  // 0, âm, NaN hoặc nhỏ hơn dòng đầu → coi như chưa có đơn (không được rơi xuống nhánh "vượt dòng cuối")
+  if (!(orders >= tableData[0].min)) {
     return {
       matched: { range: "-", pt: 0, maxA: 0 },
       next:    { range: tableData[0].range, min: tableData[0].min, pt: tableData[0].pts[colIdx] },

@@ -1,11 +1,11 @@
 // =============================================================
-// OCR ENGINE — PART 1/2
+// OCR ENGINE — PART 1/3
 // Imports · Config · Worker · Preprocess · Parse · Post-process
 // =============================================================
 
 import { state } from './state.js';
-import { WEIGHT_KEYS } from './config.js';
-import { getTodayIso, formatDateDisplay, generateId } from './utils.js';
+import { WEIGHT_KEYS, OCR_TIMEOUT_MS, MAX_CANVAS_PX } from './config.js';
+import { getTodayIso, formatDateDisplay, generateId, isValidIsoDate, escapeHtml } from './utils.js';
 import { openAddModal, openEditModal, switchModalSubTab, showToast, isAutoSaveOCR } from './ui.js';
 import { updateAllViews } from './render.js';
 import { showConfirm, showAlert } from './dialog.js';
@@ -20,7 +20,6 @@ export { getOcrCacheStats, initOcrCache, refreshOcrCacheStats } from './ocr-cach
 // ==================== CONFIG ====================
 const DISABLE_AUTO_SAVE = false;
 const DRY_RUN_OCR       = false;
-const OCR_TIMEOUT_MS    = 60000;
 
 // ==================== ABORT CONTROLLER ====================
 let _ocrAbortController = null;
@@ -29,6 +28,9 @@ export function cancelOcr() {
   if (_ocrAbortController) {
     _ocrAbortController.abort();
     _ocrAbortController = null;
+    // abort chỉ dừng phần "chờ" — job Tesseract đang chạy vẫn tiếp tục ngốn CPU và chặn hàng đợi
+    // của lần quét sau. Terminate worker để dừng hẳn (lần sau sẽ tự tạo lại, tài nguyên đã cache).
+    resetTesseractWorker().catch(() => {});
     return true;
   }
   return false;
@@ -49,12 +51,16 @@ function _clearAbortController(ctrl) {
 
 // ==================== TESSERACT WORKER ====================
 let _tessLibPromise = null;
+// Ghim phiên bản cụ thể: worker + core lấy theo phiên bản của thư viện này nên chỉ cần ghim ở đây
+// (và cùng URL trong sw.js). Đổi phiên bản → sửa cả hai nơi.
+const TESSERACT_LIB_URL = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
+
 function ensureTesseractLib() {
   if (window.Tesseract) return Promise.resolve();
   if (_tessLibPromise) return _tessLibPromise;
   _tessLibPromise = new Promise((resolve, reject) => {
     const s = document.createElement('script');
-    s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+    s.src = TESSERACT_LIB_URL;
     s.async = true;
     s.onload = resolve;
     s.onerror = () => {
@@ -239,7 +245,10 @@ async function preprocessImage(rawDataUrl, options = {}, signal) {
     img.onload = () => {
       try {
         _checkAborted(signal);
-        const scale = Math.min(4, upscale);
+        // Giới hạn diện tích canvas (iOS Safari ~16.7M px; vượt là canvas rỗng/crash) khi ảnh gốc lớn
+        let scale = Math.min(4, upscale);
+        const srcPx = img.width * img.height;
+        if (srcPx * scale * scale > MAX_CANVAS_PX) scale = Math.sqrt(MAX_CANVAS_PX / srcPx);
         const canvas = document.createElement('canvas');
         canvas.width  = Math.floor(img.width  * scale);
         canvas.height = Math.floor(img.height * scale);
@@ -270,7 +279,9 @@ async function preprocessImage(rawDataUrl, options = {}, signal) {
         }
 
         ctx.putImageData(imgData, 0, 0);
-        resolve({ dataUrl: canvas.toDataURL('image/png'), width: canvas.width, height: canvas.height });
+        const out = { dataUrl: canvas.toDataURL('image/png'), width: canvas.width, height: canvas.height };
+        canvas.width = canvas.height = 0;   // trả bộ nhớ canvas ngay (Safari giữ lại nếu không reset)
+        resolve(out);
       } catch (e) { reject(e); }
     };
     img.onerror = () => reject(new Error('Image load failed'));
@@ -338,15 +349,14 @@ function identifyRangeKey(minV, maxV) {
   for (const d of RANGE_DEFS) {
     if (d.min === minV && d.max === maxV) return d.key;
   }
-  if (minV === 0)  return '0_2';
-  if (minV === 2)  return '2_4';
-  if (minV === 4)  return '4_6';
-  if (minV === 6)  return '6_8';
-  if (minV === 8)  return '8_10';
-  if (minV === 10) return '10_12';
-  if (minV === 12) return '12_15';
-  if (minV === 15) return 'over_15';
-  return null;
+  // Fallback: OCR đọc sai số cuối của dải (vd "12 - 16"). Chỉ chấp nhận khi hai số cách nhau
+  // hợp lý (≤ 4), tránh nhận nhầm các cặp số cách xa nhau thành dải cân.
+  // (Ngày dạng "06-10" được loại riêng ở vòng lặp rangeRegex nhờ số 0 đứng đầu.)
+  const span = maxV - minV;
+  const plausible = (span >= 1 && span <= 4) || (minV === 15 && maxV >= 15);
+  if (!plausible) return null;
+  const hit = RANGE_DEFS.find(d => d.min === minV);
+  return hit ? hit.key : null;
 }
 
 // ==================== PARSE ====================
@@ -377,6 +387,8 @@ function parseOcrText(cleanText) {
   const ranges = [];
   let m;
   while ((m = rangeRegex.exec(text)) !== null) {
+    // Số có số 0 đứng đầu ("06-10") là ngày/tháng chứ không phải dải cân (">0 - 2" chỉ có "0" đơn)
+    if (/^0\d/.test(m[1]) || /^0\d/.test(m[2])) continue;
     const minV = parseInt(m[1], 10);
     const maxV = parseInt(m[2], 10);
     const key = identifyRangeKey(minV, maxV);
@@ -524,7 +536,11 @@ function postProcessFixDigits(parsed) {
   // Duyệt 2 vòng:
   //   Vòng 1 (strictMode=true):  chỉ fix có tỉ lệ đổi <= 3× (an toàn)
   //   Vòng 2 (strictMode=false): chấp nhận fix bất kỳ → đánh dấu isRisky
+  // Gom TẤT CẢ nghiệm của mỗi vòng: chỉ tự sửa khi nghiệm là DUY NHẤT.
+  // Nhiều nghiệm cùng làm tổng khớp = đang đoán → không tự sửa, để người dùng đối chiếu ảnh.
   for (const strictMode of [true, false]) {
+    const solutions = new Map();   // "key:newVal" → nghiệm
+
     for (const key of ordered) {
       const oldVal = parsed.weights[key];
       if (!oldVal || oldVal === 0) continue;
@@ -542,27 +558,35 @@ function postProcessFixDigits(parsed) {
           if (strictMode && ratio > 3) continue;
 
           const newTotal = parsed.totalFound - oldVal + newVal;
-          if (newTotal === parsed.expectedTotal) {
-            return {
-              weights: { ...parsed.weights, [key]: newVal },
-              confidences: { ...parsed.confidences, [key]: 75 },
-              expectedTotal: parsed.expectedTotal,
-              totalFound: newTotal,
-              mode: parsed.mode + '+fix' + s.from + s.to,
-              // Thông tin chi tiết để hiện cảnh báo
-              fixInfo: {
-                key,
-                oldVal,
-                newVal,
-                from: s.from,
-                to: s.to,
-                delta: newVal - oldVal,
-                isRisky: ratio > 3
-              }
-            };
-          }
+          if (newTotal !== parsed.expectedTotal) continue;
+
+          const id = key + ':' + newVal;
+          if (solutions.has(id)) continue;
+          solutions.set(id, {
+            weights: { ...parsed.weights, [key]: newVal },
+            confidences: { ...parsed.confidences, [key]: 75 },
+            expectedTotal: parsed.expectedTotal,
+            totalFound: newTotal,
+            mode: parsed.mode + '+fix' + s.from + s.to,
+            // Thông tin chi tiết để hiện cảnh báo
+            fixInfo: {
+              key,
+              oldVal,
+              newVal,
+              from: s.from,
+              to: s.to,
+              delta: newVal - oldVal,
+              isRisky: ratio > 3
+            }
+          });
         }
       }
+    }
+
+    if (solutions.size === 1) return [...solutions.values()][0];
+    if (solutions.size > 1) {
+      console.warn('[OCR] Nhiều cách sửa số đều khớp tổng → không tự sửa:', [...solutions.keys()].join(', '));
+      return null;
     }
   }
 
@@ -570,36 +594,61 @@ function postProcessFixDigits(parsed) {
 }
 
 // ==================== EXTRACT DATE ====================
+function _pad2(n) { return String(n).padStart(2, '0'); }
+
+// Dựng ISO date từ ngày/tháng (năm có thể thiếu). Trả null nếu KHÔNG phải ngày thật (vd 31/04).
+function _buildDateIso(day, month, year) {
+  let y = year;
+  if (y === undefined) {
+    y = new Date().getFullYear();
+    // Ảnh không ghi năm: nếu ra ngày ở TƯƠNG LAI (vd "30/12" chụp đầu tháng 1) → thuộc năm trước
+    if (`${y}-${_pad2(month)}-${_pad2(day)}` > getTodayIso()) y -= 1;
+  }
+  const iso = `${y}-${_pad2(month)}-${_pad2(day)}`;
+  return isValidIsoDate(iso) ? iso : null;   // phải khớp isValidIsoDate, nếu không sanitizeRecords sẽ xóa bản ghi khi tải lại
+}
+
 function extractDateStrict(text) {
   const cleanText = text.replace(/,/g, '.');
+  const isDigit = ch => ch !== undefined && ch >= '0' && ch <= '9';
+  const endOf = m => m.index + m[0].length;
 
-  const fullMatch = cleanText.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4}|\d{2})/);
-  if (fullMatch) {
-    const day = parseInt(fullMatch[1], 10);
-    const month = parseInt(fullMatch[2], 10);
-    let year = parseInt(fullMatch[3], 10);
-    if (year < 100) year += 2000;
-    if (day >= 1 && day <= 31 && month >= 1 && month <= 12 && year >= 2020 && year <= 2099) {
-      return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    }
+  // 1) ISO: yyyy-mm-dd / yyyy/mm/dd / yyyy.mm.dd — xét TRƯỚC để "2026-10-17" không bị đọc thành "26-10-17"
+  for (const im of cleanText.matchAll(/(20\d{2})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})/g)) {
+    if (isDigit(cleanText[endOf(im)])) continue;   // là đầu của số dài hơn
+    const iso = _buildDateIso(parseInt(im[3], 10), parseInt(im[2], 10), parseInt(im[1], 10));
+    if (iso) return iso;
   }
 
+  // 2) dd/mm/yyyy (hoặc yy)
+  for (const fm of cleanText.matchAll(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4}|\d{2})/g)) {
+    if (isDigit(cleanText[fm.index - 1])) continue;   // là đuôi của số khác (vd phần năm của "2026-10-17")
+    const day = parseInt(fm[1], 10);
+    const month = parseInt(fm[2], 10);
+    let year = parseInt(fm[3], 10);
+    if (year < 100) year += 2000;
+    if (year < 2020 || year > 2099) continue;
+    const iso = _buildDateIso(day, month, year);
+    if (iso) return iso;
+  }
+
+  // 3) "Ngày dd/mm"
   const dayMatch = cleanText.match(/(?:ngày|ngay)\s*[-–:]?\s*(\d{1,2})[\/\-\.](\d{1,2})/i);
   if (dayMatch) {
-    const day = parseInt(dayMatch[1], 10);
-    const month = parseInt(dayMatch[2], 10);
-    if (day >= 1 && day <= 31 && month >= 1 && month <= 12) {
-      return new Date().getFullYear() + '-' + String(month).padStart(2, '0') + '-' + String(day).padStart(2, '0');
-    }
+    const iso = _buildDateIso(parseInt(dayMatch[1], 10), parseInt(dayMatch[2], 10));
+    if (iso) return iso;
   }
 
-  const allMatches = [...cleanText.matchAll(/(\d{1,2})[\/\-\.](\d{1,2})/g)];
-  for (const m of allMatches) {
+  // 4) "dd/mm" trần (không có chữ "ngày"): dễ lẫn với dải cân "2-4", "12-15" và số có dấu chấm ngăn cách
+  //    ("1.500"). Chỉ loại bằng cách xét chữ số liền kề — KHÔNG dùng \b vì OCR hay dính chữ ("Giao06/10").
+  for (const m of cleanText.matchAll(/(\d{1,2})([\/\-\.])(\d{1,2})/g)) {
+    if (isDigit(cleanText[m.index - 1]) || isDigit(cleanText[endOf(m)])) continue;
     const day = parseInt(m[1], 10);
-    const month = parseInt(m[2], 10);
-    if (day >= 1 && day <= 31 && month >= 1 && month <= 12) {
-      return new Date().getFullYear() + '-' + String(month).padStart(2, '0') + '-' + String(day).padStart(2, '0');
-    }
+    const month = parseInt(m[3], 10);
+    const noLeadingZero = m[1] === String(day) && m[3] === String(month);
+    if (m[2] === '-' && noLeadingZero && RANGE_DEFS.some(d => d.min === day && d.max === month)) continue;
+    const iso = _buildDateIso(day, month);
+    if (iso) return iso;
   }
 
   return null;   // không thấy ngày trong ảnh
@@ -610,9 +659,8 @@ function extractDate(text) {
 }
 
 // =============================================================
-// =============================================================
-// OCR ENGINE — PART 2/2
-// Batch state · Smart Pipeline (6-pass) · Modals · Exports
+// OCR ENGINE — PART 2/3
+// Batch state · Helpers · Validation · Auto-save · Pipeline
 // =============================================================
 
 // ==================== LOG STORAGE ====================
@@ -661,6 +709,24 @@ function findExactDuplicate(r) {
 }
 
 const EMPTY_THUMB = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI1NiIgaGVpZ2h0PSI1NiI+PGRlZnM+PHBhdHRlcm4gaWQ9ImciIHdpZHRoPSIxMCIgaGVpZ2h0PSIxMCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PHJlY3Qgd2lkdGg9IjUiIGhlaWdodD0iNSIgZmlsbD0iI2U1ZTdlYiIvPjxyZWN0IHg9IjUiIHk9IjUiIHdpZHRoPSI1IiBoZWlnaHQ9IjUiIGZpbGw9IiNlNWU3ZWIiLz48L3BhdHRlcm4+PC9kZWZzPjxyZWN0IHdpZHRoPSI1NiIgaGVpZ2h0PSI1NiIgZmlsbD0idXJsKCNnKSIvPjwvc3ZnPg==';
+
+// ==================== PROGRESS BAR ====================
+/**
+ * Cập nhật progress bar trong OCR overlay.
+ * @param {number} pct - 0..100
+ * @param {string} [label] - text hiển thị bên dưới bar (VD: "Ảnh 2/5")
+ */
+function _updateOcrProgress(pct, label) {
+  const fill = document.getElementById('ocrProgressFill');
+  const text = document.getElementById('ocrProgressText');
+  const clamped = Math.max(0, Math.min(100, Math.round(pct)));
+  if (fill) fill.style.width = clamped + '%';
+  if (text) text.innerText = label ? `${clamped}% · ${label}` : clamped + '%';
+}
+
+function _resetOcrProgress() {
+  _updateOcrProgress(0, '');
+}
 
 // ==================== VALIDATE PHÂN BỐ ====================
 function validateDistribution(weights) {
@@ -724,6 +790,8 @@ async function tryAutoSave(r) {
   if (r.expectedTotal === null || r.expectedTotal !== r.totalFound) return false;
   if (r.tabDetected !== true || r.dateFound !== true) return false;
   if (r.totalFound <= 0) return false;
+  // Ngày OCR đọc ra phải là ngày thật và không ở tương lai (nếu không → để người dùng xem lại)
+  if (!isValidIsoDate(r.parsedDate) || r.parsedDate > getTodayIso()) return false;
 
   const dist = validateDistribution(r.weights);
   if (!dist.ok) return false;
@@ -731,7 +799,9 @@ async function tryAutoSave(r) {
   if (DRY_RUN_OCR) return false;
 
   const weights = buildWeights(r);
-  state.appData[type].unshift({ id: generateId(), date: r.parsedDate, weights });
+  const newId = generateId();
+
+  state.appData[type].unshift({ id: newId, date: r.parsedDate, weights });
   updateAllViews();
   return true;
 }
@@ -853,6 +923,36 @@ function ensureCancelButton() {
   overlay.appendChild(btn);
 }
 
+// ==================== BATCH SUMMARY CHIPS ====================
+/**
+ * Điền 3 chip summary vào đầu batch modal.
+ * @param {{ saved:number, dup:number, need:number }} summary
+ */
+function _renderBatchSummary(summary) {
+  const wrap       = document.getElementById('batchSummary');
+  const chipSaved  = document.getElementById('batchSummarySaved');
+  const chipDup    = document.getElementById('batchSummaryDup');
+  const chipNeed   = document.getElementById('batchSummaryNeed');
+  const cntSaved   = document.getElementById('batchSummarySavedCount');
+  const cntDup     = document.getElementById('batchSummaryDupCount');
+  const cntNeed    = document.getElementById('batchSummaryNeedCount');
+
+  if (!wrap) return;
+
+  const s = summary || { saved: 0, dup: 0, need: 0 };
+
+  if (cntSaved) cntSaved.innerText = s.saved;
+  if (cntDup)   cntDup.innerText   = s.dup;
+  if (cntNeed)  cntNeed.innerText  = s.need;
+
+  if (chipSaved) chipSaved.style.display = s.saved > 0 ? '' : 'none';
+  if (chipDup)   chipDup.style.display   = s.dup   > 0 ? '' : 'none';
+  if (chipNeed)  chipNeed.style.display  = s.need  > 0 ? '' : 'none';
+
+  const anyVisible = s.saved > 0 || s.dup > 0 || s.need > 0;
+  wrap.style.display = anyVisible ? '' : 'none';
+}
+
 // ==================== PIPELINE ====================
 async function _runOcrFromFiles(files, wasAppend = false) {
   if (!files || files.length === 0) return;
@@ -866,20 +966,48 @@ async function _runOcrFromFiles(files, wasAppend = false) {
 
   if (overlay) overlay.style.display = 'flex';
   ensureCancelButton();
+  _resetOcrProgress();
 
   try {
     const results = [];
+    const totalFiles = files.length;
 
-    for (let i = 0; i < files.length; i++) {
+    for (let i = 0; i < totalFiles; i++) {
       _checkAborted(signal);
-      if (statusTitle) statusTitle.innerText = `Ảnh ${i + 1}/${files.length}`;
+      if (statusTitle) statusTitle.innerText = `Ảnh ${i + 1}/${totalFiles}`;
       if (statusDesc)  statusDesc.innerText  = 'Đang xử lý...';
 
-      const item = await processOneFile(files[i], signal);
+      // Progress: đóng góp 0-80% cho OCR từng ảnh (20% cuối để lưu/validate)
+      const basePct   = (i / totalFiles) * 80;
+      const stepPct   = (1 / totalFiles) * 80;
+      _updateOcrProgress(basePct, `Ảnh ${i + 1}/${totalFiles}`);
+
+      // Một ảnh lỗi (không giải mã được, OCR lỗi...) KHÔNG được làm hỏng cả lô:
+      // ghi nhận lỗi cho ảnh đó rồi xử lý tiếp các ảnh còn lại. Chỉ riêng "hủy" mới dừng toàn bộ.
+      let item;
+      try {
+        item = await processOneFile(files[i], signal, (passPct) => {
+          // passPct 0..100 trong ảnh hiện tại
+          _updateOcrProgress(basePct + (passPct / 100) * stepPct, `Ảnh ${i + 1}/${totalFiles}`);
+        });
+      } catch (err) {
+        if (err && err.message === 'OCR_CANCELLED') throw err;
+        console.warn('[OCR] Lỗi ở ảnh', files[i]?.name, err);
+        item = {
+          file: files[i]?.name || `ảnh ${i + 1}`,
+          thumbnail: '',
+          result: null,
+          error: (err && err.message) || 'Lỗi không xác định'
+        };
+      }
       results.push(item);
     }
 
+    // Bước validate/lưu chiếm 80-100%
+    _updateOcrProgress(85, 'Đang kiểm tra...');
+
     if (overlay) overlay.style.display = 'none';
+    _resetOcrProgress();
 
     const autoSaved     = [];
     const duplicates    = [];
@@ -901,11 +1029,16 @@ async function _runOcrFromFiles(files, wasAppend = false) {
       }
     }
 
+    const summary = {
+      saved: autoSaved.length,
+      dup:   duplicates.length,
+      need:  needAttention.length
+    };
+
     if (needAttention.length > 0) {
       if (wasAppend) {
         batchResults.push(...needAttention);
-        renderBatchList();
-        document.getElementById('batchOcrModal').classList.add('active');
+        openBatchOcrModal(summary);
         showSummaryToast(autoSaved.length, duplicates.length, needAttention.length);
         return;
       }
@@ -921,7 +1054,8 @@ async function _runOcrFromFiles(files, wasAppend = false) {
       }
 
       batchResults = needAttention;
-      openBatchOcrModal();
+      _activeBatchItem = null;
+      openBatchOcrModal(summary);
       showSummaryToast(autoSaved.length, duplicates.length, needAttention.length, 400);
       return;
     }
@@ -952,6 +1086,7 @@ async function _runOcrFromFiles(files, wasAppend = false) {
     }
   } catch (err) {
     if (overlay) overlay.style.display = 'none';
+    _resetOcrProgress();
 
     if (err.message === 'OCR_CANCELLED') {
       showToast('Đã hủy OCR', 'warning', 2000);
@@ -965,8 +1100,13 @@ async function _runOcrFromFiles(files, wasAppend = false) {
   }
 }
 
+// =============================================================
+// OCR ENGINE — PART 3/3
+// processOneFile · Modals · Batch ops · Exports
+// =============================================================
+
 // ==================== PROCESS ONE FILE — 6-PASS SMART PIPELINE ====================
-async function processOneFile(file, signal) {
+async function processOneFile(file, signal, onProgress) {
   _checkAborted(signal);
 
   const hash = await hashBlob(file);
@@ -974,6 +1114,7 @@ async function processOneFile(file, signal) {
 
   if (cached) {
     _checkAborted(signal);
+    if (onProgress) onProgress(100);
     const rawDataUrl = await readFileAsDataURL(file);
     const cachedResult = { ...cached.result, fullDataUrl: rawDataUrl };
     return {
@@ -1001,6 +1142,12 @@ async function processOneFile(file, signal) {
   let bestText = '';
   let bestDiff = 9999;
   let knownTotal = null;   // 'Tổng' đọc được ở BẤT KỲ lần quét nào
+  let passCount = 0;
+  const TOTAL_PASSES = 6;
+
+  function _reportProgress() {
+    if (onProgress) onProgress(Math.min(100, Math.round((passCount / TOTAL_PASSES) * 100)));
+  }
 
   async function runPass(label, opt) {
     _checkAborted(signal);
@@ -1011,6 +1158,11 @@ async function processOneFile(file, signal) {
     const parsed = parseOcrText(text);
     if (parsed.expectedTotal === null && knownTotal !== null) parsed.expectedTotal = knownTotal;
     if (parsed.expectedTotal !== null && knownTotal === null) knownTotal = parsed.expectedTotal;
+    // Kết quả tốt nhất trước đó chưa có "Tổng" để đối chiếu → chấm lại với Tổng vừa đọc được
+    if (bestResult && bestResult.expectedTotal === null && knownTotal !== null) {
+      bestResult.expectedTotal = knownTotal;
+      bestDiff = Math.abs(bestResult.totalFound - knownTotal);
+    }
     const diff = parsed.expectedTotal !== null
       ? Math.abs(parsed.totalFound - parsed.expectedTotal)
       : 9999;
@@ -1019,34 +1171,46 @@ async function processOneFile(file, signal) {
       bestText = text;
       bestDiff = diff;
     }
+    passCount++;
+    _reportProgress();
     return diff;
+  }
+
+  // Còn nên quét thêm không?
+  //  - Đã khớp tổng (diff 0) → thôi.
+  //  - Chưa đọc được "Tổng" ở lượt nào (diff 9999) → thử thêm tối đa 3 lượt (một cách tiền xử lý khác
+  //    có thể đọc được), không quét đủ 6 lượt với ảnh không phải màn hình SPX.
+  function _shouldRunMore() {
+    if (bestDiff === 0) return false;
+    if (bestDiff === 9999) return passCount < 3;
+    return true;
   }
 
   // Pass 1: Otsu @ 2.0 — baseline
   await runPass('1/6', { upscale: 2.0, useOtsu: true });
 
   // Pass 2: Threshold 70 @ 2.0 — giữ nét đuôi 9
-  if (bestDiff > 0 && bestDiff !== 9999) {
+  if (_shouldRunMore()) {
     await runPass('2/6', { upscale: 2.0, useOtsu: false, threshold: 70 });
   }
 
   // Pass 3: RAW @ 2.0
-  if (bestDiff > 0 && bestDiff !== 9999) {
+  if (_shouldRunMore()) {
     await runPass('3/6', { upscale: 2.0, raw: true });
   }
 
   // Pass 4: RAW @ 1.5 — scale diversity
-  if (bestDiff > 0 && bestDiff !== 9999) {
+  if (_shouldRunMore()) {
     await runPass('4/6', { upscale: 1.5, raw: true });
   }
 
   // Pass 5: Otsu @ 2.25 — scale diversity
-  if (bestDiff > 0 && bestDiff !== 9999) {
+  if (_shouldRunMore()) {
     await runPass('5/6', { upscale: 2.25, useOtsu: true });
   }
 
   // Pass 6: Otsu @ 1.75 — scale diversity
-  if (bestDiff > 0 && bestDiff !== 9999) {
+  if (_shouldRunMore()) {
     await runPass('6/6', { upscale: 1.75, useOtsu: true });
   }
 
@@ -1064,6 +1228,9 @@ async function processOneFile(file, signal) {
     bestText = text;
   }
 
+  // Báo 100% sau khi xong hoàn toàn (kể cả fix)
+  if (onProgress) onProgress(100);
+
   const result = {
     detectedColorType: detectedType || 'del',
     tabDetected: !!detectedType,                       // false → 'del' chỉ là mặc định
@@ -1079,16 +1246,24 @@ async function processOneFile(file, signal) {
     fixInfo: bestResult.fixInfo || null
   };
 
-  cacheSet(hash, {
-    thumbnail,
-    result: { ...result, fullDataUrl: '' }
-  });
+  // Chỉ cache kết quả đã đối chiếu được. Kết quả lệch/đoán mà cache thì quét lại ảnh đó
+  // sẽ luôn ra đúng bản sai cũ (và ngày "hôm nay" mặc định bị đóng băng).
+  const verified = !result.fixInfo
+    && result.expectedTotal !== null
+    && result.totalFound === result.expectedTotal
+    && result.tabDetected && result.dateFound;
+  if (verified) {
+    cacheSet(hash, {
+      thumbnail,
+      result: { ...result, fullDataUrl: '' }
+    });
+  }
 
   return { file: file.name, thumbnail, result, error: null };
 }
 
 // ==================== FIX WARNING BANNER ====================
-function showFixWarning(fixInfo, detectedType) {
+function showFixWarning(fixInfo) {
   const old = document.getElementById('fixWarningBanner');
   if (old) old.remove();
 
@@ -1169,9 +1344,9 @@ export function fillModalFromResult(item) {
   document.getElementById('inputDate').value = r.parsedDate;
   switchModalSubTab(r.detectedColorType);
 
-  // Hiện banner cảnh báo nếu post-process đã fix số
+  // ⭐ Hiện banner cảnh báo nếu post-process đã fix số
   if (r.fixInfo) {
-    showFixWarning(r.fixInfo, r.detectedColorType);
+    showFixWarning(r.fixInfo);
   }
 
   const prefix = r.detectedColorType === 'del' ? 'del_inp'
@@ -1205,7 +1380,7 @@ export function fillModalFromResult(item) {
   else if (midCount > 0) { msg += ' · có dải vàng'; toastType = 'warning'; }
   if (!distCheck.ok) { msg += ' · ⚠️ phân bố bất thường'; toastType = 'error'; }
 
-  // Nếu post-process fix → cảnh báo mạnh
+  // ⭐ Nếu post-process fix → cảnh báo mạnh
   if (r.fixInfo) {
     msg += ' · 🔧 app đã sửa số';
     toastType = 'error';
@@ -1308,7 +1483,8 @@ export function openCompareModal(batchItem, existingRecord) {
 }
 
 // ==================== BATCH MODAL ====================
-export function openBatchOcrModal() {
+export function openBatchOcrModal(summary) {
+  _renderBatchSummary(summary);
   renderBatchList();
   document.getElementById('batchOcrModal').classList.add('active');
 }
@@ -1393,7 +1569,27 @@ function renderBatchList() {
   });
 }
 
+// Ảnh trong batch đang được mở ở form nhập/sửa (null = form không mở từ batch)
+let _activeBatchItem = null;
+
+// Form nhập đóng (X hoặc lưu xong) → hủy liên kết, để lần nhập tay sau không bị tính là "từ batch"
+window.addEventListener('spx:entry-closed', () => { _activeBatchItem = null; });
+
+/**
+ * Gọi khi LƯU THÀNH CÔNG từ form đang mở bởi 1 ảnh batch: bỏ ảnh đó khỏi batch.
+ * @returns {boolean} true nếu form này đang mở từ batch
+ */
+export function completeActiveBatchItem() {
+  if (!_activeBatchItem) return false;
+  const idx = batchResults.indexOf(_activeBatchItem);
+  if (idx !== -1) batchResults.splice(idx, 1);
+  _activeBatchItem = null;
+  showBackToBatchBtn(false);
+  return true;
+}
+
 export function removeBatchItem(idx) {
+  if (batchResults[idx] && batchResults[idx] === _activeBatchItem) _activeBatchItem = null;
   batchResults.splice(idx, 1);
   if (batchResults.length === 0) { closeBatchOcrModal(); return; }
   renderBatchList();
@@ -1408,6 +1604,7 @@ export function importBatchItem(idx) {
   closeBatchOcrModal();
   if (existing) openCompareModal(item, existing);
   else fillModalFromResult(item);
+  _activeBatchItem = item;   // gán SAU khi mở form (mở form không phát sự kiện đóng)
   showBackToBatchBtn(true);
 }
 
@@ -1417,6 +1614,7 @@ export function backToBatch() {
     showBackToBatchBtn(false);
     return;
   }
+  _activeBatchItem = null;
   const entryModal = document.getElementById('entryModal');
   if (entryModal) entryModal.classList.remove('active');
   showBackToBatchBtn(false);
@@ -1431,62 +1629,76 @@ export function showBackToBatchBtn(show) {
 export function hasBatchPending() { return batchResults.length > 0; }
 
 // ==================== SAVE BATCH ====================
+/**
+ * Lưu tất cả ảnh "an toàn". Ảnh cần người xem (ngày sai, phân bố lạ, cùng ngày nhưng khác số,
+ * ảnh lỗi) được GIỮ LẠI trong batch — không bị xóa im lặng như trước.
+ */
 export async function saveBatchAll() {
   const valid = batchResults.filter(r => !r.error);
   if (valid.length === 0) { showToast('Không có dữ liệu hợp lệ', 'error'); return; }
 
-  const seenInBatch = new Set();
-  const dedupedBatch = [];
-  let dupInBatch = 0;
-  valid.forEach(item => {
+  const today = getTodayIso();
+  const sigOf = (type, date, w) => type + '|' + date + '|' + WEIGHT_KEYS.map(k => parseInt(w[k], 10) || 0).join('_');
+
+  const seen = new Set();             // chữ ký đã lưu trong lượt này
+  const toSave = [];                  // { item, type, weights }
+  const dropped = new Set();          // ảnh trùng HOÀN TOÀN → bỏ khỏi batch
+  let dupCount = 0;
+  let reviewCount = 0;
+
+  for (const item of valid) {
     const r = item.result;
     const type = getTypeFromResult(r);
-    if (!type) { dupInBatch++; return; }
-    const key = type + '|' + r.parsedDate;
-    if (seenInBatch.has(key)) { dupInBatch++; return; }
-    seenInBatch.add(key);
-    dedupedBatch.push(item);
-  });
 
-  const finalList = [];
-  let dupExisting = 0;
-  let suspectSkipped = 0;
-  dedupedBatch.forEach(item => {
-    const r = item.result;
-    const type = getTypeFromResult(r);
-    if (!type) { dupInBatch++; return; }
+    // Ngày phải là ngày thật, không ở tương lai — nếu không sanitizeRecords sẽ xóa khi tải lại
+    if (!type || !isValidIsoDate(r.parsedDate) || r.parsedDate > today) { reviewCount++; continue; }
 
-    const existing = state.appData[type].find(rec => rec.date === r.parsedDate);
-    if (existing) { dupExisting++; return; }
+    const weights = buildWeights(r);
+    const sig = sigOf(type, r.parsedDate, weights);
 
-    const dist = validateDistribution(r.weights);
-    if (!dist.ok) { suspectSkipped++; return; }
+    // Trùng hoàn toàn (cùng ngày + cùng số) với bản đã có / ảnh đã xử lý → bỏ
+    if (seen.has(sig) || state.appData[type].some(rec => sigOf(type, rec.date, rec.weights) === sig)) {
+      dropped.add(item); dupCount++; continue;
+    }
 
-    finalList.push({ item, type, weights: buildWeights(r) });
-  });
+    // Cùng loại + cùng ngày nhưng KHÁC số → giữ lại để người dùng bấm "So sánh"
+    const sameDayExisting = state.appData[type].some(rec => rec.date === r.parsedDate);
+    const sameDayInBatch  = toSave.some(x => x.type === type && x.item.result.parsedDate === r.parsedDate);
+    if (sameDayExisting || sameDayInBatch) { reviewCount++; continue; }
 
-  const totalSkipped = dupInBatch + dupExisting + suspectSkipped;
+    if (!validateDistribution(r.weights).ok) { reviewCount++; continue; }
 
-  if (finalList.length === 0) {
-    let msg = 'Không có gì để lưu';
-    if (totalSkipped > 0) msg += ` (bỏ qua ${totalSkipped} ảnh)`;
-    showToast(msg, 'warning', 2500);
+    seen.add(sig);
+    toSave.push({ item, type, weights });
+  }
+
+  if (toSave.length === 0 && dropped.size === 0) {
+    showToast(
+      reviewCount > 0 ? `Không có ảnh nào tự lưu được — ${reviewCount} ảnh cần xem lại` : 'Không có gì để lưu',
+      'warning', 3000
+    );
     return;
   }
 
-  finalList.forEach(({ item, type, weights }) => {
+  toSave.forEach(({ item, type, weights }) => {
     state.appData[type].unshift({ id: generateId(), date: item.result.parsedDate, weights });
   });
 
-  batchResults = [];
-  showBackToBatchBtn(false);
-  closeBatchOcrModal();
+  const done = new Set(toSave.map(x => x.item));
+  batchResults = batchResults.filter(it => !done.has(it) && !dropped.has(it));
   updateAllViews();
 
-  let doneMsg = `Đã lưu ${finalList.length} bản ghi`;
-  if (totalSkipped > 0) doneMsg += ` (bỏ qua ${totalSkipped} ảnh)`;
-  if (suspectSkipped > 0) doneMsg += ` · ⚠️ ${suspectSkipped} nghi ngờ`;
-  showToast(doneMsg, 'success', 3000);
+  let doneMsg = `Đã lưu ${toSave.length} bản ghi`;
+  if (dupCount > 0) doneMsg += ` · bỏ ${dupCount} ảnh trùng`;
+
+  if (batchResults.length === 0) {
+    showBackToBatchBtn(false);
+    closeBatchOcrModal();
+    showToast(doneMsg, 'success', 3000);
+  } else {
+    renderBatchList();
+    showToast(doneMsg + ` · còn ${batchResults.length} ảnh cần xem`, 'warning', 3500);
+  }
 }
 
 // ==================== HIGHLIGHT ====================
@@ -1514,25 +1726,6 @@ export function applyConfidenceHighlight(confMap, detectedType) {
       parent.appendChild(badge);
     }
   });
-}
-
-export function clearAllConfidenceHighlights() {
-  // Xóa banner fix (nếu có)
-  const fixBanner = document.getElementById('fixWarningBanner');
-  if (fixBanner) fixBanner.remove();
-
-  const prefixes = ['del_inp', 'pick_inp', 'ret_inp'];
-  const keys = ['0_2','2_4','4_6','6_8','8_10','10_12','12_15','over_15'];
-  prefixes.forEach(pfx => keys.forEach(k => {
-    const input = document.getElementById(pfx + '_' + k);
-    if (!input) return;
-    input.classList.remove('conf-high', 'conf-mid', 'conf-low', 'conf-suspect');
-    const parent = input.closest('.weight-input-item');
-    if (parent) {
-      const badge = parent.querySelector('.conf-badge');
-      if (badge) badge.remove();
-    }
-  }));
 }
 
 // ==================== LIGHTBOX ====================
@@ -1584,13 +1777,6 @@ export async function handleSharedImage(sharedFiles) {
   await _runOcrFromFiles(images, false);
 }
 
-// ==================== ESCAPE HTML ====================
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, c => ({
-    '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'
-  }[c]));
-}
-
 // ==================== INTERNAL: showSummaryToast ====================
 function showSummaryToast(saved, dup, need, delay = 0) {
   const parts = [];
@@ -1603,3 +1789,10 @@ function showSummaryToast(saved, dup, need, delay = 0) {
   const type = need > 0 ? 'warning' : (dup > 0 ? 'warning' : 'success');
   setTimeout(() => showToast(msg, type, 3500), delay);
 }
+
+// Chỉ phục vụ unit test (tests/) — app không dùng
+export const __test = {
+  parseOcrText, extractDateStrict, postProcessFixDigits, identifyRangeKey,
+  setBatch(list) { batchResults = list; },
+  getBatch() { return batchResults; }
+};

@@ -67,14 +67,6 @@ export function switchModalSubTab(tabKey) {
 }
 
 // ================ OVERVIEW FILTER (deprecated) ================
-/**
- * @deprecated — Card "Cơ hội tăng điểm" hiện top 4 gộp 3 loại.
- * Giữ function này để tránh vỡ import từ main.js.
- */
-export function setOverviewFilter(filter, el) {
-  console.warn('[ui] setOverviewFilter không còn dùng');
-}
-
 // ================ ALL OPPORTUNITIES MODAL ================
 export function openAllOpportunitiesModal() {
   const modal = document.getElementById('allOpportunitiesModal');
@@ -348,8 +340,6 @@ export function setRankTier(rankKey, bonusPct, el) {
 
   el.parentElement.querySelectorAll('.rank-pill').forEach(p => p.classList.remove('active'));
   el.classList.add('active');
-  const label = document.getElementById('currentBonusPctLabel');
-  if (label) label.innerText = `+${Math.round(bonusPct * 100)}%`;
   updateAllViews();
 }
 
@@ -360,8 +350,6 @@ function resetRankToNone() {
     p.classList.remove('active');
     p.classList.remove('long-pressing');
   });
-  const label = document.getElementById('currentBonusPctLabel');
-  if (label) label.innerText = '+0%';
   updateAllViews();
   showToast('Đã bỏ chọn hạng thưởng tháng này', 'success', 1800);
 }
@@ -406,8 +394,6 @@ export function syncRankUIForCurrentMonth() {
   document.querySelectorAll('.rank-pill').forEach(p => {
     p.classList.toggle('active', p.dataset.rank === cfg.name);
   });
-  const label = document.getElementById('currentBonusPctLabel');
-  if (label) label.innerText = `+${Math.round((cfg.bonus || 0) * 100)}%`;
 }
 
 export function initRankUI() {
@@ -586,6 +572,7 @@ export async function closeModal(force) {
   document.getElementById('entryModal').classList.remove('active');
   state.isOcrScan = false;
   state.lastOcrImageDataUrl = '';
+  window.dispatchEvent(new Event('spx:entry-closed'));
 }
 
 // ================ MENU MODAL ================
@@ -720,8 +707,12 @@ export function showToast(message, type = 'success', duration = 2200) {
 
 // ================ HELPERS ================
 function clearAllConfidenceHighlightsLocal() {
-  const banner = document.getElementById('distWarningBanner');
-  if (banner) banner.remove();
+  // Cả hai banner cảnh báo OCR: nếu không xóa cả "fixWarningBanner", cảnh báo cũ sẽ dính lại
+  // khi mở form nhập/sửa thủ công sau một lần OCR có sửa số.
+  ['distWarningBanner', 'fixWarningBanner'].forEach(id => {
+    const b = document.getElementById(id);
+    if (b) b.remove();
+  });
 
   ['del_inp','pick_inp','ret_inp'].forEach(pfx =>
     ['0_2','2_4','4_6','6_8','8_10','10_12','12_15','over_15'].forEach(k => {

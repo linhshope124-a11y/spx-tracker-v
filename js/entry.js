@@ -1,9 +1,9 @@
-import { state } from './state.js';
+import { state, persistData } from './state.js';
 import { WEIGHT_KEYS, WEIGHT_SUFFIXES } from './config.js';
-import { sanitizeInt, generateId, getTodayIso, formatDateDisplay, isValidIsoDate } from './utils.js';
+import { sanitizeInt, generateId, getTodayIso, getCurrentMonthIso, formatDateDisplay, deepClone, isValidIsoDate } from './utils.js';
 import { closeModal, showToast } from './ui.js';
 import { updateAllViews } from './render.js';
-import { hasBatchPending, backToBatch } from './ocr.js';
+import { hasBatchPending, backToBatch, completeActiveBatchItem } from './ocr.js';
 import { showAlert, showConfirm, showChoice } from './dialog.js';
 import { downloadBackupFile } from './backup.js';
 
@@ -32,7 +32,12 @@ export async function saveRecord() {
 
   const editId   = document.getElementById('editEntryId').value;
   const editType = document.getElementById('editEntryType').value;
-  const wasFromBatch = hasBatchPending();
+
+  // Có id nhưng thiếu loại → trạng thái form hỏng; nếu để rơi xuống nhánh "thêm mới" sẽ tạo bản ghi rác
+  if (editId && !editType) {
+    await showAlert('Không xác định được loại bản ghi đang sửa.\n\nHãy đóng form và mở lại.', { title: 'Lỗi', okText: 'Đóng' });
+    return;
+  }
 
   if (editId && editType) {
     // === SỬA ===
@@ -41,6 +46,16 @@ export async function saveRecord() {
                  : editType === 'pickup'   ? 'pick_inp'
                  : 'ret_inp';
     const weights = parseWeights(prefix);
+
+    // Không cho lưu bản ghi toàn số 0 (sẽ thành bản ghi "ma" trong nhật ký)
+    if (Object.values(weights).reduce((a, b) => a + b, 0) === 0) {
+      await showAlert(
+        'Bản ghi này không còn đơn nào.\n\nNếu muốn bỏ bản ghi, hãy bấm Xóa trong Nhật ký.',
+        { title: 'Thiếu dữ liệu', okText: 'Đóng' }
+      );
+      return;
+    }
+
     const idx = state.appData[editType].findIndex(it => it.id === numId);
     if (idx === -1) {
       await showAlert('Không tìm thấy bản ghi để cập nhật.', { title: 'Lỗi', okText: 'Đóng' });
@@ -91,16 +106,30 @@ export async function saveRecord() {
       return;
     }
 
-    if (delT  > 0) state.appData.delivery.unshift({ id: generateId(), date, weights: delW });
-    if (pickT > 0) state.appData.pickup.unshift({ id: generateId(), date, weights: pickW });
-    if (retT  > 0) state.appData.return.unshift({ id: generateId(), date, weights: retW });
+    if (delT  > 0) {
+      const id = generateId();
+      state.appData.delivery.unshift({ id, date, weights: delW });
+    }
+    if (pickT > 0) {
+      const id = generateId();
+      state.appData.pickup.unshift({ id, date, weights: pickW });
+    }
+    if (retT  > 0) {
+      const id = generateId();
+      state.appData.return.unshift({ id, date, weights: retW });
+    }
   }
+
+  // Nếu form này mở từ 1 ảnh trong batch OCR → bỏ ảnh đó khỏi batch (đã lưu xong)
+  // TRƯỚC khi đóng modal (closeModal sẽ hủy liên kết ảnh batch)
+  const fromBatch = completeActiveBatchItem();
 
   closeModal(true);
   updateAllViews();
 
-  if (wasFromBatch) {
-    setTimeout(() => backToBatch(), 200);
+  if (fromBatch) {
+    if (hasBatchPending()) setTimeout(() => backToBatch(), 200);
+    else showToast('Đã xử lý xong tất cả ảnh', 'success', 2200);
   }
 }
 
@@ -121,7 +150,7 @@ export async function deleteRecord(type, id) {
   updateAllViews();
 }
 
-// Xóa toàn bộ — chỉ HỎI, không bắt buộc backup
+// ⭐ Xóa toàn bộ — chỉ HỎI, không bắt buộc backup
 export async function clearAllHistory() {
   const total = state.appData.delivery.length + state.appData.pickup.length + state.appData.return.length;
   if (total === 0) {
@@ -153,7 +182,7 @@ export async function clearAllHistory() {
   //  Nếu chọn "Có lưu backup": lưu file + xác nhận đã lưu xong
   // ═══════════════════════════════════════════════════════════
   if (choice === 'backup_then_delete') {
-    // Trigger download NGAY trong stack này để browser cho phép (user gesture)
+    // ⚠️ Trigger download NGAY trong stack này để browser cho phép (user gesture)
     downloadBackupFile('SPX_BeforeDelete');
 
     // Đợi browser bắt đầu tải
@@ -179,8 +208,11 @@ export async function clearAllHistory() {
   //  Tiến hành xóa
   // ═══════════════════════════════════════════════════════════
   state.appData = { delivery: [], pickup: [], return: [] };
-  localStorage.removeItem('spx_backup_vault');
-  localStorage.removeItem('spx_dual_records');
+  try {
+    localStorage.removeItem('spx_backup_vault');
+    localStorage.removeItem('spx_dual_records');
+  } catch {}
+  persistData();      // ghi NGAY (không chờ debounce) → thoát app sớm cũng không "sống lại" dữ liệu cũ
   updateAllViews();
 
   // Toast xác nhận
@@ -188,4 +220,55 @@ export async function clearAllHistory() {
     ? `✅ Đã lưu backup và xóa ${total} bản ghi`
     : `⚠️ Đã xóa ${total} bản ghi (không backup)`;
   showToast(finalMsg, choice === 'backup_then_delete' ? 'success' : 'warning', 3000);
+}
+
+/**
+ * Xóa toàn bộ dữ liệu (Giao + Lấy + Hoàn) của tháng đang xem. Dữ liệu các tháng khác giữ nguyên.
+ */
+export async function deleteCurrentMonthHistory() {
+  const cm = state.currentMonth || getCurrentMonthIso();
+  const [y, m] = cm.split('-');
+  const label = `${parseInt(m, 10)}/${y}`;
+  const inMonth = r => r.date.startsWith(cm + '-');
+
+  const count = ['delivery', 'pickup', 'return'].reduce((n, t) => n + state.appData[t].filter(inMonth).length, 0);
+  if (count === 0) {
+    await showAlert(`Không có dữ liệu trong tháng ${label} để xóa.`, { title: 'Không có dữ liệu', okText: 'Đóng' });
+    return;
+  }
+
+  const choice = await showChoice(
+    `Thao tác này sẽ xóa vĩnh viễn ${count} bản ghi của tháng ${label}.\n\n` +
+    `Dữ liệu các tháng khác được giữ nguyên.\n\n` +
+    `Bạn có muốn sao lưu dữ liệu trước khi xóa không?`,
+    {
+      title: `⚠️ Xóa dữ liệu tháng ${label}`,
+      icon: '⚠️',
+      buttons: [
+        { id: 'cancel',             text: '← Hủy bỏ',          variant: 'ghost'   },
+        { id: 'backup_then_delete', text: '📥 Sao lưu & Xóa',  variant: 'primary' },
+        { id: 'delete_now',         text: '🗑️ Xóa vĩnh viễn', variant: 'danger'  }
+      ]
+    }
+  );
+  if (choice === 'cancel') return;
+
+  if (choice === 'backup_then_delete') {
+    // Phải gọi ngay trong luồng của thao tác bấm nút để trình duyệt cho phép tải file
+    downloadBackupFile('SPX_BeforeDeleteMonth');
+    await new Promise(r => setTimeout(r, 800));
+    const confirmDelete = await showConfirm(
+      `File sao lưu đã được tải xuống chưa?\n\n` +
+      `Chọn "Xác nhận xóa" để hoàn tất, hoặc "Hủy" nếu bạn chưa thấy file.`,
+      { title: '🚨 Xác nhận xóa', okText: 'Xác nhận xóa', cancelText: 'Hủy', danger: true }
+    );
+    if (!confirmDelete) return;
+  }
+
+  ['delivery', 'pickup', 'return'].forEach(t => {
+    state.appData[t] = state.appData[t].filter(r => !inMonth(r));
+  });
+
+  updateAllViews();
+  showToast(`Đã xóa dữ liệu tháng ${label}`, 'success', 3000);
 }

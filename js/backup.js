@@ -5,22 +5,17 @@ import {
   persistSalaryByMonth,
   persistRankByMonth
 } from './state.js';
-import { APP_VERSION, STORAGE_KEYS, WEIGHT_KEYS } from './config.js';
-import { getTodayIso } from './utils.js';
+import { STORAGE_KEYS, WEIGHT_KEYS, AUTO_BACKUP_DAYS } from './config.js';
+import { getTodayIso, generateId } from './utils.js';
 import { updateAllViews } from './render.js';
 import { initRankUI, initRegionUI, showToast } from './ui.js';
-import { showAlert, showConfirm } from './dialog.js';
+import { showAlert, showConfirm, showChoice } from './dialog.js';
 
 // ==================== CONFIG ====================
-const AUTO_BACKUP_DAYS = 7;
 const AUTO_BACKUP_LAST_KEY = 'spx_last_auto_backup';
 const AUTO_BACKUP_SNOOZE_KEY = 'spx_auto_backup_snooze';
 
 // ==================== HELPERS ====================
-function weightsEqual(a, b) {
-  return WEIGHT_KEYS.every(k => (parseInt(a[k], 10) || 0) === (parseInt(b[k], 10) || 0));
-}
-
 function dedupeList(list) {
   const seen = new Set();
   return list.filter(r => {
@@ -35,15 +30,57 @@ function totalRecords(data) {
   return (data.delivery?.length || 0) + (data.pickup?.length || 0) + (data.return?.length || 0);
 }
 
-// ⭐ HÀM MỚI: Tạo payload backup
-function buildBackupPayload() {
+// Lấy phần "data" từ payload: hỗ trợ cả {data:{...}, settings} lẫn dạng trần {delivery,pickup,return}
+function payloadSource(parsed) {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  const src = (parsed.data && typeof parsed.data === 'object') ? parsed.data : parsed;
+  const has = k => Array.isArray(src[k]);
+  return (has('delivery') || has('pickup') || has('return')) ? src : null;
+}
+
+export function countPayloadRecords(parsed) {
+  const src = payloadSource(parsed);
+  if (!src) return 0;
+  return (src.delivery?.length || 0) + (src.pickup?.length || 0) + (src.return?.length || 0);
+}
+
+// Chuẩn hoá settings nhập từ file/Cloud — không tin dữ liệu ngoài (kiểu, khoá, miền giá trị)
+const MONTH_KEY_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
+function sanitizeSalaryByMonth(src) {
+  const out = {};
+  if (!src || typeof src !== 'object' || Array.isArray(src)) return out;
+  Object.keys(src).forEach(m => {
+    const c = src[m];
+    if (!MONTH_KEY_RE.test(m) || !c || typeof c !== 'object') return;
+    out[m] = {
+      base:   Math.max(0, Number(c.base)   || 0),
+      buuCuc: Math.max(0, Number(c.buuCuc) || 0),
+      taiXe:  Math.max(0, Number(c.taiXe)  || 0)
+    };
+  });
+  return out;
+}
+function sanitizeRankByMonth(src) {
+  const out = {};
+  if (!src || typeof src !== 'object' || Array.isArray(src)) return out;
+  Object.keys(src).forEach(m => {
+    const c = src[m];
+    if (!MONTH_KEY_RE.test(m) || !c || typeof c !== 'object') return;
+    const name = typeof c.name === 'string' ? c.name.trim().slice(0, 30) : '';
+    if (!name || name === 'none') return;
+    out[m] = { name, bonus: Math.min(1, Math.max(0, Number(c.bonus) || 0)) };
+  });
+  return out;
+}
+
+// Tạo payload backup (dùng chung cho file + Cloud)
+export function buildBackupPayload() {
   return {
-    version: APP_VERSION,
+    version: 1,
     exportedAt: new Date().toISOString(),
     settings: {
       rankByMonth:   state.rankByMonth,
       salaryByMonth: state.salaryByMonth,
-      salaryDays:    state.salaryDays,
       region:        state.region,
       theme:         localStorage.getItem(STORAGE_KEYS.theme) || 'light'
     },
@@ -63,7 +100,7 @@ export function downloadBackupFile(prefix = 'SPX_Data') {
   document.body.appendChild(a);
   a.click();
   a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 30000);   // không thu hồi ngay: một số trình duyệt hủy tải
+  setTimeout(() => URL.revokeObjectURL(url), 1500);   // giữ URL đủ lâu để trình duyệt bắt đầu tải, tránh giữ timer 30 giây
   markBackupDone();
 }
 
@@ -132,6 +169,7 @@ export function copyDataJson() {
   const jsonStr = JSON.stringify(state.appData, null, 2);
   const btn = document.getElementById('copyJsonBtn');
   const ok = () => {
+    if (!btn) { showToast('Đã chép dữ liệu', 'success', 1800); return; }
     btn.innerHTML = '✓ Đã chép!';
     btn.style.background = '#10b981'; btn.style.borderColor = '#10b981'; btn.style.color = '#fff';
     setTimeout(() => { btn.innerHTML = '📋 Chép'; btn.style.background = ''; btn.style.borderColor = ''; btn.style.color = ''; }, 2000);
@@ -157,12 +195,10 @@ export function closePasteJsonModal() { document.getElementById('pasteJsonModal'
 
 // ==================== APPLY IMPORT ====================
 export function applyImportedPayload(parsed, mode = 'overwrite') {
-  let importedData = null, importedSettings = null;
-  if (parsed?.data && (parsed.data.delivery || parsed.data.pickup || parsed.data.return)) {
-    importedData = parsed.data; importedSettings = parsed.settings || null;
-  } else if (parsed && (parsed.delivery || parsed.pickup || parsed.return)) {
-    importedData = parsed;
-  } else return { success: false };
+  const importedData = payloadSource(parsed);
+  if (!importedData) return { success: false };
+  const importedSettings = (parsed.data && typeof parsed.data === 'object' && parsed.settings && typeof parsed.settings === 'object')
+    ? parsed.settings : null;
 
   const newDel  = dedupeList(sanitizeRecords(importedData.delivery));
   const newPick = dedupeList(sanitizeRecords(importedData.pickup));
@@ -186,12 +222,17 @@ export function applyImportedPayload(parsed, mode = 'overwrite') {
       const merged = [...oldList];
       const keyOf = r => r.date + '|' + WEIGHT_KEYS.map(k => r.weights[k]).join('_');
       const have = new Set(oldList.map(keyOf));
+      const usedIds = new Set(oldList.map(r => r.id));
       let added = 0;
       newList.forEach(r => {
         const k = keyOf(r);
         if (have.has(k)) return;
         have.add(k);
-        merged.push(r);
+        // id trùng với bản ghi đang có (vd nạp lại backup cũ sau khi đã sửa) → cấp id mới,
+        // nếu không Sửa/Xóa sẽ luôn trúng bản ghi đầu tiên
+        const rec = usedIds.has(r.id) ? { ...r, id: generateId() } : r;
+        usedIds.add(rec.id);
+        merged.push(rec);
         added++;
       });
       return { list: merged, added };
@@ -212,36 +253,32 @@ export function applyImportedPayload(parsed, mode = 'overwrite') {
     console.log(`[Import] MERGE: thêm ${addedCount}, skip ${removedCount} trùng`);
   }
 
-  persistData();
-
   // ===== Settings =====
   if (importedSettings) {
-    if (typeof importedSettings.region === 'string' &&
-        (importedSettings.region === 'mien' || importedSettings.region === 'hcm_hn')) {
+    if (importedSettings.region === 'mien' || importedSettings.region === 'hcm_hn') {
       state.region = importedSettings.region;
-      localStorage.setItem('spx_region', state.region);
+      try { localStorage.setItem('spx_region', state.region); } catch {}
     }
 
-    if (typeof importedSettings.theme === 'string') {
-      localStorage.setItem(STORAGE_KEYS.theme, importedSettings.theme);
+    if (importedSettings.theme === 'light' || importedSettings.theme === 'dark') {
+      try { localStorage.setItem(STORAGE_KEYS.theme, importedSettings.theme); } catch {}
       document.documentElement.setAttribute('data-theme', importedSettings.theme);
     }
 
     if (importedSettings.salaryByMonth && typeof importedSettings.salaryByMonth === 'object') {
+      const incoming = sanitizeSalaryByMonth(importedSettings.salaryByMonth);
       if (mode === 'overwrite') {
-        state.salaryByMonth = importedSettings.salaryByMonth;
+        state.salaryByMonth = incoming;
       } else {
-        Object.keys(importedSettings.salaryByMonth).forEach(m => {
-          if (!state.salaryByMonth[m]) {
-            state.salaryByMonth[m] = importedSettings.salaryByMonth[m];
-          }
+        Object.keys(incoming).forEach(m => {
+          if (!state.salaryByMonth[m]) state.salaryByMonth[m] = incoming[m];
         });
       }
       persistSalaryByMonth();
     } else {
       const legacySalary = Number(importedSettings.manualSalary) || 0;
-      const legacyBuuCuc = importedSettings.manualPoints?.buuCuc || 0;
-      const legacyTaiXe  = importedSettings.manualPoints?.taiXe  || 0;
+      const legacyBuuCuc = Number(importedSettings.manualPoints?.buuCuc) || 0;
+      const legacyTaiXe  = Number(importedSettings.manualPoints?.taiXe)  || 0;
       if (legacySalary > 0 || legacyBuuCuc > 0 || legacyTaiXe > 0) {
         const m = state.currentMonth || new Date().toISOString().slice(0, 7);
         if (!state.salaryByMonth[m]) {
@@ -252,13 +289,12 @@ export function applyImportedPayload(parsed, mode = 'overwrite') {
     }
 
     if (importedSettings.rankByMonth && typeof importedSettings.rankByMonth === 'object') {
+      const incoming = sanitizeRankByMonth(importedSettings.rankByMonth);
       if (mode === 'overwrite') {
-        state.rankByMonth = importedSettings.rankByMonth;
+        state.rankByMonth = incoming;
       } else {
-        Object.keys(importedSettings.rankByMonth).forEach(m => {
-          if (!state.rankByMonth[m]) {
-            state.rankByMonth[m] = importedSettings.rankByMonth[m];
-          }
+        Object.keys(incoming).forEach(m => {
+          if (!state.rankByMonth[m]) state.rankByMonth[m] = incoming[m];
         });
       }
       persistRankByMonth();
@@ -266,23 +302,24 @@ export function applyImportedPayload(parsed, mode = 'overwrite') {
       const m = state.currentMonth || new Date().toISOString().slice(0, 7);
       if (!state.rankByMonth[m]) {
         state.rankByMonth[m] = {
-          name: importedSettings.rankName,
-          bonus: Number(importedSettings.rankBonus) || 0
+          name: importedSettings.rankName.slice(0, 30),
+          bonus: Math.min(1, Math.max(0, Number(importedSettings.rankBonus) || 0))
         };
         persistRankByMonth();
       }
     }
 
-    if (Number.isFinite(importedSettings.salaryDays)) {
-      state.salaryDays = importedSettings.salaryDays;
-      localStorage.setItem('spx_salary_days', state.salaryDays);
-    }
+    // Lưu ý: importedSettings.salaryDays (bản cũ) bị bỏ qua — không còn dùng
   }
 
   persistData();
   return { success: true, addedCount, removedCount, mode };
 }
 
+/**
+ * Hỏi cách nạp. Trả về 'overwrite' | 'merge' | 'cancel'.
+ * Dùng dialog 3 nút — chạm ra ngoài / Esc = HỦY (trước đây bị hiểu là "THÊM VÀO").
+ */
 export async function askImportMode(newCount = 0) {
   const currentTotal = totalRecords(state.appData);
   if (currentTotal === 0) return 'overwrite';
@@ -291,17 +328,53 @@ export async function askImportMode(newCount = 0) {
   const msg =
     `App đang có ${currentTotal} bản ghi.` + newInfo + `\n` +
     `Chọn cách nạp:\n\n` +
-    `• GHI ĐÈ — Xóa hết data cũ, thay bằng dữ liệu mới\n` +
-    `• THÊM VÀO — Giữ data cũ + thêm mới (bỏ qua bản ghi trùng)`;
+    `• THÊM VÀO — giữ data cũ + thêm mới (bỏ qua bản ghi trùng)\n` +
+    `• GHI ĐÈ — xóa hết data cũ, thay bằng dữ liệu mới`;
 
-  const ok = await showConfirm(msg, {
+  const choice = await showChoice(msg, {
     title: 'Nạp dữ liệu',
-    okText: 'GHI ĐÈ',
-    cancelText: 'THÊM VÀO',
-    danger: true
+    icon: '📥',
+    buttons: [
+      { id: 'cancel',    text: '← Hủy',                    variant: 'ghost'   },
+      { id: 'merge',     text: '➕ Thêm vào (giữ data cũ)', variant: 'primary' },
+      { id: 'overwrite', text: '♻️ Ghi đè (xóa data cũ)',   variant: 'danger'  }
+    ]
   });
+  return (choice === 'merge' || choice === 'overwrite') ? choice : 'cancel';
+}
 
-  return ok ? 'overwrite' : 'merge';
+export function importDoneMessage(mode, result, sourceLabel = '') {
+  const src = sourceLabel ? ` ${sourceLabel}` : '';
+  return mode === 'overwrite'
+    ? `Đã GHI ĐÈ${src}: ${result.addedCount} bản ghi`
+    : `Đã THÊM VÀO${src}: +${result.addedCount} bản ghi` +
+      (result.removedCount > 0 ? `\nBỏ qua ${result.removedCount} bản ghi trùng` : '');
+}
+
+/**
+ * Luồng nạp dùng chung cho: dán JSON, chọn file, khôi phục Cloud.
+ * Kiểm tra định dạng → file rỗng → hỏi cách nạp → áp dụng.
+ * @returns {Promise<{status:'ok'|'cancel'|'invalid'|'empty', mode?:string, result?:object}>}
+ */
+export async function runImport(parsed) {
+  if (!payloadSource(parsed)) {
+    await showAlert('Dữ liệu không đúng định dạng sao lưu của app!', { title: 'Lỗi định dạng', okText: 'Đóng' });
+    return { status: 'invalid' };
+  }
+  const newCount = countPayloadRecords(parsed);
+  if (newCount === 0) {
+    await showAlert('File không có bản ghi nào để nạp.\n\nDữ liệu hiện tại được giữ nguyên.', { title: 'File rỗng', okText: 'Đóng' });
+    return { status: 'empty' };
+  }
+  const mode = await askImportMode(newCount);
+  if (mode === 'cancel') return { status: 'cancel' };
+
+  const result = applyImportedPayload(parsed, mode);
+  if (!result.success) {
+    await showAlert('Dữ liệu không đúng định dạng sao lưu của app!', { title: 'Lỗi định dạng', okText: 'Đóng' });
+    return { status: 'invalid' };
+  }
+  return { status: 'ok', mode, result };
 }
 
 // ==================== IMPORT (paste JSON) ====================
@@ -320,28 +393,14 @@ export async function confirmImportJsonString() {
     return;
   }
 
-  const newCount = (parsed.data?.delivery?.length || 0)
-                 + (parsed.data?.pickup?.length   || 0)
-                 + (parsed.data?.return?.length   || 0);
-  const mode = await askImportMode(newCount);
-  if (mode === 'cancel') return;
-
-  const result = applyImportedPayload(parsed, mode);
-  if (!result.success) {
-    await showAlert('Chuỗi JSON không đúng định dạng!', { title: 'Lỗi định dạng', okText: 'Đóng' });
-    return;
-  }
+  const out = await runImport(parsed);
+  if (out.status !== 'ok') return;   // hủy / sai định dạng / rỗng → giữ nguyên form để người dùng sửa
 
   updateAllViews();
   initRankUI();
   initRegionUI();
   closePasteJsonModal();
-
-  const msg = mode === 'overwrite'
-    ? `Đã GHI ĐÈ: ${result.addedCount} bản ghi mới`
-    : `Đã THÊM VÀO: +${result.addedCount} bản ghi` +
-      (result.removedCount > 0 ? `\nBỏ qua ${result.removedCount} bản ghi trùng` : '');
-  await showAlert(msg, { title: '✅ Hoàn tất', okText: 'OK' });
+  await showAlert(importDoneMessage(out.mode, out.result), { title: '✅ Hoàn tất', okText: 'OK' });
 }
 
 // ==================== EXPORT ====================
@@ -351,45 +410,34 @@ export function exportData() {
 
 // ==================== IMPORT FILE ====================
 export async function importData(event) {
-  const file = event.target.files[0];
+  const input = event.target;
+  const file = input.files && input.files[0];
   if (!file) return;
 
   const reader = new FileReader();
+  reader.onerror = async () => {
+    input.value = '';
+    await showAlert('Không đọc được file sao lưu!', { title: 'Lỗi file', okText: 'Đóng' });
+  };
   reader.onload = async e => {
+    input.value = '';   // cho phép chọn lại đúng file đó lần sau
     let parsed;
     try {
       parsed = JSON.parse(e.target.result);
     } catch {
       await showAlert('Không đọc được file sao lưu!', { title: 'Lỗi file', okText: 'Đóng' });
-      event.target.value = '';
       return;
     }
 
-    const newCount = (parsed.data?.delivery?.length || 0)
-                   + (parsed.data?.pickup?.length   || 0)
-                   + (parsed.data?.return?.length   || 0);
-    const mode = await askImportMode(newCount);
-    if (mode === 'cancel') { event.target.value = ''; return; }
-
-    const result = applyImportedPayload(parsed, mode);
-    if (!result.success) {
-      await showAlert('File sao lưu không đúng định dạng!', { title: 'Lỗi file', okText: 'Đóng' });
-      event.target.value = '';
-      return;
-    }
+    const out = await runImport(parsed);
+    if (out.status !== 'ok') return;
 
     updateAllViews();
     initRankUI();
     initRegionUI();
-
-    const msg = mode === 'overwrite'
-      ? `Đã GHI ĐÈ: ${result.addedCount} bản ghi mới`
-      : `Đã THÊM VÀO: +${result.addedCount} bản ghi` +
-        (result.removedCount > 0 ? `\nBỏ qua ${result.removedCount} bản ghi trùng` : '');
-    await showAlert(msg, { title: '✅ Hoàn tất', okText: 'OK' });
+    await showAlert(importDoneMessage(out.mode, out.result), { title: '✅ Hoàn tất', okText: 'OK' });
   };
   reader.readAsText(file);
-  event.target.value = '';
 }
 
 // ==================== RESTORE FROM VAULT ====================

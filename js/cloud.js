@@ -1,12 +1,7 @@
-import {
-  state,
-  persistData,
-  persistSalaryByMonth,
-  persistRankByMonth
-} from './state.js';
-import { STORAGE_KEYS, APP_VERSION } from './config.js';
-import { applyImportedPayload, askImportMode } from './backup.js';
+import { state } from './state.js';
+import { buildBackupPayload, countPayloadRecords, runImport, importDoneMessage } from './backup.js';
 import { updateAllViews } from './render.js';
+import { initRankUI, initRegionUI } from './ui.js';
 import { showAlert, showConfirm } from './dialog.js';
 
 const GH_API = 'https://api.github.com';
@@ -23,21 +18,6 @@ function setStatus(msg, type) {
   if (!el) return;
   el.className = 'cloud-status ' + (type || 'idle');
   el.innerText = msg;
-}
-
-function buildPayload() {
-  return {
-    version: APP_VERSION,
-    exportedAt: new Date().toISOString(),
-    settings: {
-      rankByMonth:   state.rankByMonth,
-      salaryByMonth: state.salaryByMonth,
-      salaryDays:    state.salaryDays,
-      region:        state.region,
-      theme:         localStorage.getItem(STORAGE_KEYS.theme) || 'light'
-    },
-    data: state.appData
-  };
 }
 
 // ==================== TOKEN WARNING ====================
@@ -92,7 +72,7 @@ export async function testCloudConnection() {
     });
     if (!res.ok) throw new Error('Token sai hoặc hết hạn');
     const user = await res.json();
-    localStorage.setItem('spx_gh_token', token);
+    try { localStorage.setItem('spx_gh_token', token); } catch (storageError) { throw new Error('Token hợp lệ nhưng không lưu được trên thiết bị. Hãy kiểm tra bộ nhớ/trình duyệt.'); }
     if (input) input.value = '';
     updateTokenUI();
     setStatus(`✅ OK — ${user.login}`, 'ok');
@@ -101,55 +81,72 @@ export async function testCloudConnection() {
   }
 }
 
+// ==================== TOKEN SAVE (chỉ sau khi token dùng được) ====================
+function commitTypedToken(input, token) {
+  if (!input || !input.value.trim()) return;
+  try { localStorage.setItem('spx_gh_token', token); } catch {}
+  input.value = '';
+  updateTokenUI();
+}
+
 // ==================== PUSH TO CLOUD ====================
-export async function pushToCloud() {
+let _pushing = false;
+
+/**
+ * @param {{auto?: boolean}} [opts] auto=true khi gọi từ auto-backup (không bao giờ đẩy dữ liệu rỗng)
+ */
+export async function pushToCloud(opts) {
+  const auto = !!(opts && opts.auto === true);
+  if (_pushing) {
+    if (!auto) setStatus('⏳ Đang backup, vui lòng đợi...', 'idle');
+    return;
+  }
+
   const input = document.getElementById('ghTokenInput');
-  const token = (input?.value || '').trim() || getToken();
+  const typed = (input?.value || '').trim();
+  const token = typed || getToken();
 
   if (!token) { setStatus('❌ Chưa có token', 'err'); return; }
 
-  if (input?.value?.trim()) {
-    const ok = await ensureTokenWarning();
-    if (!ok) { setStatus('Đã hủy lưu token', 'idle'); return; }
-
-    localStorage.setItem('spx_gh_token', input.value.trim());
-    input.value = '';
-    updateTokenUI();
+  // ⚠️ Chặn đẩy bản RỖNG đè lên bản Cloud (vd vừa "Xóa toàn bộ" xong, auto-backup chạy sau 10s)
+  const total = countPayloadRecords({ data: state.appData });
+  if (total === 0) {
+    if (auto) {
+      console.warn('[Cloud] Bỏ qua auto-backup: không có bản ghi nào (tránh ghi đè bản Cloud bằng dữ liệu rỗng)');
+      return;
+    }
+    const goOn = await showConfirm(
+      'App đang KHÔNG có bản ghi nào.\n\nBackup bây giờ sẽ GHI ĐÈ bản trên Cloud bằng dữ liệu rỗng (có thể mất bản backup cũ).\n\nVẫn tiếp tục?',
+      { title: '⚠️ Dữ liệu rỗng', okText: 'Vẫn backup', cancelText: 'Hủy', danger: true }
+    );
+    if (!goOn) { setStatus('Đã hủy backup', 'idle'); return; }
   }
 
-  let gistId = (document.getElementById('gistIdInput')?.value.trim()) || getGistId();
-  const payload = buildPayload();
+  if (typed) {
+    const ok = await ensureTokenWarning();
+    if (!ok) { setStatus('Đã hủy lưu token', 'idle'); return; }
+  }
+
+  const gistId = (document.getElementById('gistIdInput')?.value.trim()) || getGistId();
+  const payload = buildBackupPayload();
+  const body = JSON.stringify({
+    ...(gistId ? {} : { description: 'SPX Tracker auto-backup', public: false }),
+    files: { [GIST_FILENAME]: { content: JSON.stringify(payload, null, 2) } }
+  });
+
+  _pushing = true;
   setStatus('⏳ Đang backup...', 'idle');
 
   try {
-    let res;
-    if (gistId) {
-      res = await fetch(`${GH_API}/gists/${gistId}`, {
-        method: 'PATCH',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Accept': 'application/vnd.github+json',
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          files: { [GIST_FILENAME]: { content: JSON.stringify(payload, null, 2) } }
-        })
-      });
-    } else {
-      res = await fetch(`${GH_API}/gists`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Accept': 'application/vnd.github+json',
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          description: 'SPX Tracker auto-backup',
-          public: false,
-          files: { [GIST_FILENAME]: { content: JSON.stringify(payload, null, 2) } }
-        })
-      });
-    }
+    const res = await fetch(gistId ? `${GH_API}/gists/${gistId}` : `${GH_API}/gists`, {
+      method: gistId ? 'PATCH' : 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/vnd.github+json',
+        'Content-Type': 'application/json'
+      },
+      body
+    });
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -157,22 +154,26 @@ export async function pushToCloud() {
     }
 
     const gist = await res.json();
-    localStorage.setItem('spx_gist_id', gist.id);
+    commitTypedToken(input, token);   // token đã dùng được → lúc này mới lưu
+    try { localStorage.setItem('spx_gist_id', gist.id); } catch (e) { console.warn('[Cloud] Không lưu được Gist ID:', e); }
     const gistInput = document.getElementById('gistIdInput');
     if (gistInput) gistInput.value = gist.id;
 
     const now = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
-    localStorage.setItem('spx_last_backup', now);
+    try { localStorage.setItem('spx_last_backup', now); } catch (e) { console.warn('[Cloud] Không lưu được thời điểm backup:', e); }
     setStatus(`✅ Đã backup lúc ${now}`, 'ok');
   } catch (e) {
     setStatus(`❌ Lỗi: ${e.message}`, 'err');
+  } finally {
+    _pushing = false;
   }
 }
 
 // ==================== PULL FROM CLOUD ====================
 export async function pullFromCloud() {
   const input = document.getElementById('ghTokenInput');
-  const token = (input?.value || '').trim() || getToken();
+  const typed = (input?.value || '').trim();
+  const token = typed || getToken();
   const gistId = (document.getElementById('gistIdInput')?.value.trim()) || getGistId();
 
   if (!token || !gistId) { setStatus('❌ Chưa cấu hình token/gist', 'err'); return; }
@@ -183,13 +184,9 @@ export async function pullFromCloud() {
   );
   if (!ok) return;
 
-  if (input?.value?.trim()) {
+  if (typed) {
     const warnOk = await ensureTokenWarning();
     if (!warnOk) { setStatus('Đã hủy lưu token', 'idle'); return; }
-
-    localStorage.setItem('spx_gh_token', input.value.trim());
-    input.value = '';
-    updateTokenUI();
   }
 
   setStatus('⏳ Đang tải...', 'idle');
@@ -199,36 +196,32 @@ export async function pullFromCloud() {
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const gist = await res.json();
-    const content = gist.files[GIST_FILENAME]?.content;
+    const file = gist.files && gist.files[GIST_FILENAME];
+    if (!file) throw new Error('Không tìm thấy dữ liệu trong Gist');
+
+    // Gist cắt nội dung > ~1MB trong phản hồi API → phải tải bản đầy đủ từ raw_url
+    let content = file.content;
+    if (file.truncated && file.raw_url) {
+      const raw = await fetch(file.raw_url);
+      if (!raw.ok) throw new Error(`Không tải được bản đầy đủ (HTTP ${raw.status})`);
+      content = await raw.text();
+    }
     if (!content) throw new Error('Không tìm thấy dữ liệu trong Gist');
 
     const parsed = JSON.parse(content);
-    if (!parsed.data || !parsed.data.delivery) throw new Error('Dữ liệu không hợp lệ');
+    commitTypedToken(input, token);   // token đã dùng được → lưu
 
-    const newCount = (parsed.data.delivery?.length || 0)
-                   + (parsed.data.pickup?.length   || 0)
-                   + (parsed.data.return?.length   || 0);
-    const mode = await askImportMode(newCount);
-    if (mode === 'cancel') { setStatus('Đã hủy', 'idle'); return; }
+    const out = await runImport(parsed);   // kiểm tra định dạng / file rỗng / hỏi cách nạp
+    if (out.status === 'cancel')  { setStatus('Đã hủy', 'idle'); return; }
+    if (out.status === 'invalid') { setStatus('❌ Dữ liệu trong Gist không hợp lệ', 'err'); return; }
+    if (out.status === 'empty')   { setStatus('❌ Gist không có bản ghi nào', 'err'); return; }
 
-    const result = applyImportedPayload(parsed, mode);
-    if (!result.success) throw new Error('Áp dụng dữ liệu thất bại');
-
-    persistData();
-
-    const { initRankUI, initRegionUI } = await import('./ui.js');
-    const { updateAllViews } = await import('./render.js');
     initRankUI();
     initRegionUI();
     updateAllViews();
 
-    const doneMsg = mode === 'overwrite'
-      ? `Đã GHI ĐÈ từ Cloud: ${result.addedCount} bản ghi`
-      : `Đã THÊM VÀO từ Cloud: +${result.addedCount} bản ghi` +
-        (result.removedCount > 0 ? `\nBỏ qua ${result.removedCount} trùng` : '');
-
     setStatus('✅ Khôi phục thành công!', 'ok');
-    await showAlert(doneMsg, { title: '✅ Hoàn tất', okText: 'OK' });
+    await showAlert(importDoneMessage(out.mode, out.result, 'từ Cloud'), { title: '✅ Hoàn tất', okText: 'OK' });
   } catch (e) {
     setStatus(`❌ Lỗi: ${e.message}`, 'err');
   }
@@ -291,8 +284,13 @@ export function initCloudUI() {
   if (toggle) {
     toggle.checked = autoBackup;
     toggle.onchange = () => {
-      localStorage.setItem('spx_auto_backup', toggle.checked ? '1' : '0');
-      setStatus(toggle.checked ? '✅ Đã bật auto-backup' : 'Đã tắt auto-backup', toggle.checked ? 'ok' : 'idle');
+      try {
+        localStorage.setItem('spx_auto_backup', toggle.checked ? '1' : '0');
+        setStatus(toggle.checked ? '✅ Đã bật auto-backup' : 'Đã tắt auto-backup', toggle.checked ? 'ok' : 'idle');
+      } catch (e) {
+        toggle.checked = !toggle.checked;
+        setStatus('❌ Không lưu được tùy chọn auto-backup trên thiết bị', 'err');
+      }
     };
   }
 
@@ -314,7 +312,7 @@ export function scheduleAutoBackup() {
   if (!isAutoBackup() || !getToken()) return;
   clearTimeout(autoBackupTimer);
   autoBackupTimer = setTimeout(() => {
-    pushToCloud().catch(e => console.warn('[Cloud] Auto-backup failed:', e));
+    pushToCloud({ auto: true }).catch(e => console.warn('[Cloud] Auto-backup failed:', e));
   }, 10000);
 }
 

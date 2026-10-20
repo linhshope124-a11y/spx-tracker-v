@@ -165,4 +165,13 @@ export const STORAGE_KEYS = {
   theme:   'spx_theme'
 };
 
-export const APP_VERSION = 1;
+// Version của pipeline OCR (parser + preprocess + post-process).
+// Đổi giá trị này khi parser thay đổi → tự động invalidate toàn bộ cache OCR cũ.
+// Format cache key: `${OCR_CACHE_VERSION}-${OCR_PIPELINE_VERSION}_<hash>`
+export const OCR_PIPELINE_VERSION = 'p2';
+
+// ── Hằng số vận hành (trước đây rải rác trong render.js / ocr.js / backup.js) ──
+export const TAIXE_ORDER_THRESHOLD = 1500;   // đơn Giao/tháng tối thiểu để được cộng điểm Tài xế
+export const AUTO_BACKUP_DAYS      = 7;      // nhắc backup file sau bao nhiêu ngày
+export const OCR_TIMEOUT_MS        = 60000;  // timeout mỗi lượt nhận dạng
+export const MAX_CANVAS_PX         = 14000000; // trần diện tích canvas khi phóng to ảnh (iOS ~16.7M)

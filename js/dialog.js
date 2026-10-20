@@ -73,6 +73,9 @@ export function showChoice(message, options = {}) {
 
     const box = document.createElement('div');
     box.className = 'dialog-box';
+    box.setAttribute('role', 'dialog');
+    box.setAttribute('aria-modal', 'true');
+    box.setAttribute('aria-label', options.title || 'Chọn hành động');
 
     const iconWrap = document.createElement('div');
     iconWrap.className = 'dialog-icon-wrap';
@@ -162,6 +165,12 @@ function _openDialog({ type, title, message, okText, cancelText, danger, resolve
   _currentType = type;
 
   const shade    = document.getElementById('dialogModal');
+  const staticDialog = shade?.querySelector('.dialog-box');
+  if (staticDialog) {
+    staticDialog.setAttribute('role', 'dialog');
+    staticDialog.setAttribute('aria-modal', 'true');
+    staticDialog.setAttribute('aria-label', title || 'Thông báo');
+  }
   const titleEl  = document.getElementById('dialogTitle');
   const msgEl    = document.getElementById('dialogMessage');
   const iconEl   = document.getElementById('dialogIcon');

@@ -71,3 +71,10 @@ export function debounce(fn, delay) {
 export function deepClone(obj) {
   return JSON.parse(JSON.stringify(obj));
 }
+
+// Escape chuỗi trước khi chèn vào innerHTML (tên file, thông báo lỗi... — mọi dữ liệu không phải số)
+export function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}

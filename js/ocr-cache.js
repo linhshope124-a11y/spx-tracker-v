@@ -7,9 +7,13 @@
 
 import { showConfirm } from './dialog.js';
 import { showToast } from './ui.js';
+import { OCR_PIPELINE_VERSION } from './config.js';
 
 // ==================== CONFIG ====================
-const OCR_CACHE_VERSION = 'v1';          // ⚠️ đổi khi parser/pipeline đổi → bỏ kết quả OCR cũ (key khác → không match)
+const OCR_CACHE_VERSION = 'v1';          // ⚠️ đổi khi cấu trúc cache đổi (VD: đổi schema value)
+// OCR_PIPELINE_VERSION import từ config.js — đổi khi parser/pipeline đổi → bỏ kết quả OCR cũ
+// Cache key: `${OCR_CACHE_VERSION}-${OCR_PIPELINE_VERSION}_<hash>` = v1-p1_<hash>
+
 const DB_NAME = 'spx_ocr_cache';
 const DB_VERSION = 2;   // 2: bản v1 từng tạo store 'results' cùng tên DB → store 'entries' không tồn tại, cache hỏng im lặng
 const STORE_NAME = 'entries';
@@ -61,7 +65,7 @@ function openDB() {
 
 // ==================== HELPERS ====================
 function _cacheKey(hash) {
-  return `${OCR_CACHE_VERSION}_${hash}`;
+  return `${OCR_CACHE_VERSION}-${OCR_PIPELINE_VERSION}_${hash}`;
 }
 
 function _memGet(key) {
@@ -166,7 +170,7 @@ async function _dbSet(key, value) {
         tx.objectStore(STORE_NAME).put({ key, value, ts: Date.now() });
         tx.oncomplete = () => resolve();
         tx.onerror = e => reject((e && e.target && e.target.error) || tx.error || new Error('IDB lỗi'));
-      tx.onabort = () => reject(tx.error || new Error('IDB abort'));
+        tx.onabort = () => reject(tx.error || new Error('IDB abort'));
       });
     } else {
       throw e;
@@ -210,7 +214,7 @@ async function _evictOldest(n) {
 
     tx.oncomplete = () => resolve(removed);
     tx.onerror = e => reject((e && e.target && e.target.error) || tx.error || new Error('IDB lỗi'));
-      tx.onabort = () => reject(tx.error || new Error('IDB abort'));
+    tx.onabort = () => reject(tx.error || new Error('IDB abort'));
   });
 }
 
@@ -344,7 +348,7 @@ function _cleanLegacyLocalStorage() {
 /**
  * Init — gọi 1 lần khi app khởi động.
  * - Mở IDB
- * - Dọn cache localStorage cũ
+ * - Dọn cache localStorage cũ (không migrate)
  */
 export async function initOcrCache() {
   if (_migrationDone) return;
@@ -353,56 +357,13 @@ export async function initOcrCache() {
   try {
     await openDB();
 
-    // Migration: đọc cache từ localStorage cũ → chuyển sang IDB
-    await _migrateFromLocalStorage();
-
-    // Sau migration, dọn sạch localStorage
+    // Cache localStorage đời cũ được tạo bởi parser cũ → KHÔNG chuyển sang IDB
+    // (nếu chuyển, kết quả cũ sẽ mang nhãn phiên bản hiện tại và bị coi là hợp lệ). Chỉ dọn bỏ.
     _cleanLegacyLocalStorage();
 
     console.log('[OcrCache] Đã khởi tạo IDB cache');
   } catch (e) {
     console.warn('[OcrCache] Init fail — fallback RAM-only:', e);
-  }
-}
-
-async function _migrateFromLocalStorage() {
-  const LS_PREFIX = 'spx_ocr_ls_';
-  const LS_INDEX = 'spx_ocr_ls_index';
-
-  let index = [];
-  try {
-    const raw = localStorage.getItem(LS_INDEX);
-    if (raw) index = JSON.parse(raw);
-  } catch {}
-
-  if (!Array.isArray(index) || index.length === 0) return;
-
-  let migrated = 0;
-
-  for (const fullKey of index) {
-    try {
-      const raw = localStorage.getItem(LS_PREFIX + fullKey);
-      if (!raw) continue;
-
-      const value = JSON.parse(raw);
-      if (!value) continue;
-
-      // fullKey có dạng "v1b-3_<hash>" → strip version cũ, thêm version mới
-      const hashPart = fullKey.split('_').slice(1).join('_');
-      if (!hashPart) continue;
-
-      const newKey = _cacheKey(hashPart);
-
-      await _dbSet(newKey, value);
-      _memSet(newKey, value);
-      migrated++;
-    } catch (e) {
-      // Ignore entry lỗi, tiếp tục entry khác
-    }
-  }
-
-  if (migrated > 0) {
-    console.log(`[OcrCache] Migration: ${migrated}/${index.length} entries`);
   }
 }
 

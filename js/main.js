@@ -2,7 +2,7 @@ import { state, loadState, persistSettings, persistPeriodState, getSalaryConfig,
 import { initTheme, toggleTheme } from './theme.js';
 import { getTodayIso, getCurrentMonthIso } from './utils.js';
 import {
-  switchMainTab, switchModalSubTab, setOverviewFilter, setHistFilter,
+  switchMainTab, switchModalSubTab, setHistFilter,
   setRankTier, initRankUI,
   initRegionUI,
   setPeriodMode, periodPrev, periodNext, openPeriodPicker,
@@ -32,7 +32,7 @@ import {
   initOcrCache, refreshOcrCacheStats,
   handleSharedImage
 } from './ocr.js';
-import { saveRecord, deleteRecord, clearAllHistory } from './entry.js';
+import { saveRecord, deleteRecord, clearAllHistory, deleteCurrentMonthHistory } from './entry.js';
 import {
   copyDataJson, openPasteJsonModal, closePasteJsonModal,
   confirmImportJsonString, exportData, importData, restoreFromVault,
@@ -49,6 +49,7 @@ import {
 import { showAlert, showConfirm } from './dialog.js';
 import { WEIGHT_KEYS } from './config.js';
 import { requestPrecacheTesseract } from './sw-bridge.js';
+import { initErrorHandler } from './error-handler.js';
 
 // ================ AUTO-CLEAR INPUT ================
 function attachAutoClearInputs() {
@@ -61,8 +62,8 @@ function attachAutoClearInputs() {
 // ================ SAVE CONFIG THEO THÁNG ================
 let manualPointsTimer = null;
 function _saveManualPoints() {
-  const buuCuc = parseFloat(document.getElementById('manualBuuCucInput').value) || 0;
-  const taiXe  = parseFloat(document.getElementById('manualTaiXeInput').value) || 0;
+  const buuCuc = parseInt(document.getElementById('manualBuuCucInput').value, 10) || 0;
+  const taiXe  = parseInt(document.getElementById('manualTaiXeInput').value, 10) || 0;
   const cfg = getSalaryConfig(state.currentMonth);
   setSalaryConfig(state.currentMonth, { ...cfg, buuCuc, taiXe });
   clearTimeout(manualPointsTimer);
@@ -170,11 +171,9 @@ function _initHeroExpandState() {
 // ================ INFO ICON ================
 function _showIncomeInfo() {
   showAlert(
-    'Lương 1 công = (LCB + KC Bưu cục + KC Tài xế) / số ngày tối đa\n\n' +
-    '📏 ĐƠN VỊ: ĐIỂM (không phải đồng)\n' +
-    '→ Tự quy đổi từ màn hình "Điểm tạm tính" của app SPX.\n\n' +
-    '⚡ KC Tài xế CHỈ được cộng khi đơn Giao ≥ 1.500/tháng.\n' +
-    'Nếu < 1.500 → không cộng KC Tài xế vào lương.\n\n' +
+    'Lương 1 công = (LCB + Bưu cục + Tài xế) / số ngày tối đa\n\n' +
+    '⚡ Tài xế CHỈ được cộng khi đơn Giao ≥ 1.500/tháng.\n' +
+    'Nếu < 1.500 → không cộng Tài xế vào lương.\n\n' +
     'Đã tích lũy = Lương 1 công × số công\n\n' +
     'Quy đổi: Giao + Lấy/6 + Hoàn\n' +
     '• Miền Trung: ≥60 = 1 công, ≥30 = 0.5 công\n' +
@@ -199,7 +198,7 @@ function _openOcrPicker() {
 
 // ================ AUTO-UPDATE ================
 let swRegistration = null;
-let currentAppVersion = null;
+let currentAppVersion = document.querySelector('meta[name=\"spx-app-version\"]')?.content || null;
 let waitingWorker = null;
 
 async function registerSW() {
@@ -247,7 +246,7 @@ async function checkVersion(manual = false) {
 
     if (!currentAppVersion) {
       currentAppVersion = serverVersion;
-      console.log('[Update] Current version:', serverVersion);
+      console.warn('[Update] Thiếu version nhúng trong HTML; tạm dùng version server.');
       if (manual) showToast(`ℹ️ Bản hiện tại: ${serverVersion}`, 'info', 2500);
       return;
     }
@@ -440,7 +439,7 @@ Object.assign(window, {
   setAutoSaveOCR,
   toggleAutoSaveOCR,
   toggleAutoSaveOCRFromMenu,
-  switchMainTab, switchModalSubTab, setOverviewFilter, setHistFilter,
+  switchMainTab, switchModalSubTab, setHistFilter,
   setRankTier,
   syncRankUIForCurrentMonth,
 
@@ -483,7 +482,7 @@ Object.assign(window, {
       if (oldRegion === regionKey) return;
 
       state.region = regionKey;
-      localStorage.setItem('spx_region', regionKey);
+      try { localStorage.setItem('spx_region', regionKey); } catch (e) { console.warn('[Storage] Không lưu được khu vực:', e); }
 
       document.querySelectorAll('.region-pill').forEach(p => p.classList.remove('active'));
       if (el) el.classList.add('active');
@@ -510,7 +509,7 @@ Object.assign(window, {
   openBatchOcrModal, closeBatchOcrModal, appendBatchFiles,
   saveBatchAll, importBatchItem, removeBatchItem,
   backToBatch, hasBatchPending, showBackToBatchBtn,
-  saveRecord, deleteRecord, clearAllHistory,
+  saveRecord, deleteRecord, clearAllHistory, deleteCurrentMonthHistory,
   copyDataJson, openPasteJsonModal, closePasteJsonModal,
   confirmImportJsonString, exportData, importData, restoreFromVault,
   downloadBackupFile,
@@ -520,12 +519,12 @@ Object.assign(window, {
   saveSalaryConfig: _saveSalaryConfig,
 
   forceSaveConfig: function() {
-    const buuCuc = parseFloat(document.getElementById('manualBuuCucInput').value) || 0;
-    const taiXe  = parseFloat(document.getElementById('manualTaiXeInput').value) || 0;
+    const buuCuc = parseInt(document.getElementById('manualBuuCucInput').value, 10) || 0;
+    const taiXe  = parseInt(document.getElementById('manualTaiXeInput').value, 10) || 0;
     const salary = parseFloat(document.getElementById('salaryBaseInput').value) || 0;
 
     setSalaryConfig(state.currentMonth, { base: salary, buuCuc, taiXe });
-    localStorage.setItem('spx_region', state.region);
+    try { localStorage.setItem('spx_region', state.region); } catch (e) { console.warn('[Storage] Không lưu được khu vực:', e); }
 
     clearTimeout(manualPointsTimer);
     clearTimeout(salaryTimer);
@@ -533,15 +532,15 @@ Object.assign(window, {
 
     const [y, m] = state.currentMonth.split('-');
     const taiXeNote = taiXe > 0
-      ? `\n⚡ KC Tài xế chỉ được cộng khi đơn Giao ≥ 1.500/tháng.`
+      ? `\n⚡ Tài xế chỉ được cộng khi đơn Giao ≥ 1.500/tháng.`
       : '';
 
     showAlert(
       `Đã lưu cấu hình cho Tháng ${parseInt(m, 10)}/${y}!\n\n` +
-      `• LCB:        ${salary.toLocaleString('vi-VN')} Điểm\n` +
-      `• KC Bưu cục: ${buuCuc.toLocaleString('vi-VN')} Điểm\n` +
-      `• KC Tài xế:  ${taiXe.toLocaleString('vi-VN')} Điểm\n` +
-      `• Khu vực:    ${state.region === 'hcm_hn' ? 'TP.HCM & HN' : 'Miền Trung'}` +
+      `• Lương:   ${salary.toLocaleString('vi-VN')}\n` +
+      `• Bưu cục: ${buuCuc.toLocaleString('vi-VN')}\n` +
+      `• Tài xế:  ${taiXe.toLocaleString('vi-VN')}\n` +
+      `• Khu vực: ${state.region === 'hcm_hn' ? 'TP.HCM & HN' : 'Miền Trung'}` +
       taiXeNote,
       { title: 'Đã lưu cấu hình', okText: 'OK' }
     );
@@ -574,8 +573,31 @@ window.addEventListener('spx:storage-error', () => {
     { title: '⚠️ Không lưu được', okText: 'Đã hiểu' });
 });
 
+// ================ PWA SHORTCUT LAUNCH ================
+function _handleShortcutLaunch() {
+  try {
+    const url = new URL(window.location.href);
+    const action = url.searchParams.get('action');
+    if (action !== 'ocr' && action !== 'history') return;
+    // Remove query after reading it so refresh does not repeat the shortcut action.
+    url.searchParams.delete('action');
+    window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+    if (action === 'history') {
+      openHistoryTab();
+      return;
+    }
+    // Run synchronously after initial render to maximize compatibility with file-picker gesture rules.
+    _openOcrPicker();
+  } catch (e) {
+    console.warn('[PWA] Không xử lý được shortcut:', e);
+  }
+}
+
 // ================ INIT ================
 (async function init() {
+  // Bật error handler TRƯỚC TIÊN — để bắt mọi lỗi từ loadState() trở đi
+  initErrorHandler();
+
   loadState();
   initTheme();
   initRankUI();
@@ -597,6 +619,7 @@ window.addEventListener('spx:storage-error', () => {
   window.addEventListener('focus', _maybeAutoCheck);
 
   _runShareTargetIfNeeded();
+  _handleShortcutLaunch();
 
   // ⭐ AUTO BACKUP CHECK — sau 5 giây (đợi app render xong)
   // Nếu đang bận (form/modal đang mở hoặc OCR đang chạy) thì lùi lại 60 giây, tối đa 5 lần — tránh hộp thoại bật đè lúc đang nhập

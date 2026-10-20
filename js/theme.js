@@ -1,20 +1,15 @@
 import { STORAGE_KEYS } from './config.js';
 
 export function initTheme() {
-  const saved = localStorage.getItem(STORAGE_KEYS.theme) || 'light';
-  document.documentElement.setAttribute('data-theme', saved);
-  updateThemeBtnUI(saved);
+  let saved = 'light';
+  try { saved = localStorage.getItem(STORAGE_KEYS.theme) || 'light'; } catch {}
+  document.documentElement.setAttribute('data-theme', saved === 'dark' ? 'dark' : 'light');
 }
 
 export function toggleTheme() {
-  const cur  = document.documentElement.getAttribute('data-theme') || 'light';
+  const cur = document.documentElement.getAttribute('data-theme') || 'light';
   const next = cur === 'light' ? 'dark' : 'light';
   document.documentElement.setAttribute('data-theme', next);
-  localStorage.setItem(STORAGE_KEYS.theme, next);
-  updateThemeBtnUI(next);
-}
-
-export function updateThemeBtnUI(t) {
-  const icon = document.getElementById('themeIcon');
-  if (icon) icon.innerText = t === 'dark' ? '☀️' : '🌙';
+  try { localStorage.setItem(STORAGE_KEYS.theme, next); }
+  catch (e) { console.warn('[Theme] Không lưu được tùy chọn giao diện:', e); }
 }
