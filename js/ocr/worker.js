@@ -6,6 +6,8 @@ export function cancelOcr() {
   if (_ocrAbortController) {
     _ocrAbortController.abort();
     _ocrAbortController = null;
+    // abort chỉ dừng phần "chờ" — job Tesseract đang chạy vẫn tiếp tục ngốn CPU và chặn hàng đợi
+    // của lần quét sau. Terminate worker để dừng hẳn (lần sau sẽ tự tạo lại, tài nguyên đã cache).
     resetTesseractWorker().catch(() => {});
     return true;
   }
@@ -25,7 +27,10 @@ export function clearAbortController(ctrl) {
   if (_ocrAbortController === ctrl) _ocrAbortController = null;
 }
 
+// ==================== TESSERACT WORKER ====================
 let _tessLibPromise = null;
+// Ghim phiên bản cụ thể: worker + core lấy theo phiên bản của thư viện này nên chỉ cần ghim ở đây
+// (và cùng URL trong sw.js). Đổi phiên bản → sửa cả hai nơi.
 const TESSERACT_LIB_URL = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
 
 function ensureTesseractLib() {
@@ -94,10 +99,17 @@ export async function preloadTesseractWorker() {
   catch (e) { console.warn('[OCR] Preload thất bại:', e); }
 }
 
+// ==================== TIMEOUT WRAPPER ====================
 function withTimeout(promise, ms, signal) {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`OCR timeout sau ${ms / 1000}s`)), ms);
-    const onAbort = () => { clearTimeout(timer); reject(new Error('OCR_CANCELLED')); };
+    const timer = setTimeout(
+      () => reject(new Error(`OCR timeout sau ${ms / 1000}s`)),
+      ms
+    );
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new Error('OCR_CANCELLED'));
+    };
     if (signal) signal.addEventListener('abort', onAbort, { once: true });
 
     promise.then(v => {
@@ -112,22 +124,34 @@ function withTimeout(promise, ms, signal) {
   });
 }
 
+// ==================== OCR RECOGNIZE ====================
 export async function ocrRecognize(preprocessedDataUrl, signal) {
   checkAborted(signal);
+
   try {
     const worker = await getTesseractWorker();
     checkAborted(signal);
-    const result = await withTimeout(worker.recognize(preprocessedDataUrl), OCR_TIMEOUT_MS, signal);
+    const result = await withTimeout(
+      worker.recognize(preprocessedDataUrl),
+      OCR_TIMEOUT_MS,
+      signal
+    );
     return result.data.text || '';
   } catch (err) {
     if (err.message === 'OCR_CANCELLED') throw err;
+
     console.warn('[OCR] Attempt 1 fail → reset worker + retry:', err.message);
     await resetTesseractWorker();
     checkAborted(signal);
+
     try {
       const worker = await getTesseractWorker();
       checkAborted(signal);
-      const result = await withTimeout(worker.recognize(preprocessedDataUrl), OCR_TIMEOUT_MS, signal);
+      const result = await withTimeout(
+        worker.recognize(preprocessedDataUrl),
+        OCR_TIMEOUT_MS,
+        signal
+      );
       return result.data.text || '';
     } catch (err2) {
       if (err2.message === 'OCR_CANCELLED') throw err2;
