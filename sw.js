@@ -3,11 +3,9 @@
 // Cache: app shell (CACHE) + Tesseract (TESS_CACHE) + Share Target
 //
 // ⚠️ MỖI LẦN SỬA FILE TRONG CORE → BUMP CACHE VERSION
-//    - spx-tracker-v2 → spx-tracker-v2.1 → ... → spx-tracker-v2.3   (tests/repo.test.mjs kiểm tra khớp với version.json)
-//    - TESS_CACHE và SHARE_CACHE KHÔNG cần bump (dữ liệu không đổi)
 // =============================================================
 
-const CACHE       = 'spx-tracker-v2.4';    // v2.3 (đồng bộ version.json)
+const CACHE       = 'spx-tracker-v2.6';    // v2.6 (Cập nhật cấu trúc OCR)
 const TESS_CACHE  = 'spx-tesseract-v1';    // giữ nguyên — Tesseract không đổi
 const SHARE_CACHE = 'spx-shared-files';    // giữ nguyên — dữ liệu tạm
 
@@ -27,7 +25,16 @@ const CORE = [
   './js/state.js',
   './js/calc.js',
   './js/theme.js',
-  './js/ocr.js',
+  
+  // Thư mục OCR mới
+  './js/ocr/index.js',
+  './js/ocr/worker.js',
+  './js/ocr/preprocess.js',
+  './js/ocr/detect.js',
+  './js/ocr/parser.js',
+  './js/ocr/processor.js',
+  './js/ocr/batch.js',
+
   './js/ocr-cache.js',
   './js/sw-bridge.js',
   './js/ui.js',
@@ -35,21 +42,17 @@ const CORE = [
   './js/entry.js',
   './js/backup.js',
   './js/cloud.js',
-  './js/error-handler.js',   // ⭐ Phase 4 — thay cho undo.js đã xóa
+  './js/error-handler.js',
   './js/dialog.js'
 ];
 
 // ==================== TESSERACT RUNTIME URLs ====================
-// Chỉ precache thư viện chính + dữ liệu tiếng Việt khi user bấm 📷 lần đầu.
-// Worker + core KHÔNG precache theo URL cố định: Tesseract tự gọi URL có phiên bản đầy đủ
-// (vd tesseract.js@v5.x.x/...) nên URL "@5" cố định sẽ không bao giờ khớp. Thay vào đó mọi URL
-// thuộc TESS_URL_PREFIXES được cache lúc chạy (lần OCR online đầu tiên) → các lần sau chạy offline.
 const TESS_RUNTIME_URLS = [
-  'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js',   // phải trùng TESSERACT_LIB_URL trong ocr.js
+  'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js',
   'https://tessdata.projectnaptha.com/4.0.0/vie.traineddata.gz'
 ];
 const TESS_URL_PREFIXES = [
-  'https://cdn.jsdelivr.net/npm/tesseract.js',   // gồm cả tesseract.js@… và tesseract.js-core@…
+  'https://cdn.jsdelivr.net/npm/tesseract.js',
   'https://tessdata.projectnaptha.com/'
 ];
 
@@ -91,7 +94,6 @@ self.addEventListener('message', e => {
     return;
   }
 
-  // 📷 Precache Tesseract khi user thực sự dùng OCR
   if (data.type === 'PRECACHE_TESSERACT') {
     e.waitUntil(
       caches.open(TESS_CACHE).then(async cache => {
@@ -180,7 +182,6 @@ self.addEventListener('fetch', e => {
   const req = e.request;
   const url = new URL(req.url);
 
-  // POST /share-target
   if (req.method === 'POST') {
     if (url.origin === self.location.origin && url.pathname.endsWith('/share-target')) {
       e.respondWith(handleShareTarget(req));
@@ -190,17 +191,12 @@ self.addEventListener('fetch', e => {
 
   if (req.method !== 'GET') return;
 
-  // ===== Tesseract URLs (cross-origin) =====
-  // Cache-first từ TESS_CACHE. Nếu chưa có → fetch rồi cache.
   if (_isTesseractUrl(req.url)) {
     e.respondWith(
       caches.open(TESS_CACHE).then(async cache => {
         const cached = await cache.match(req.url);
         if (cached) return cached;
         try {
-          // importScripts() trong worker gửi request kiểu no-cors → phản hồi 'opaque' (không cache được).
-          // Gọi lại bằng CORS (jsdelivr / tessdata đều cho phép) để có phản hồi cache được,
-          // rồi trả chính phản hồi đó cho trang — dùng được cho cả request no-cors.
           const res = await fetch(req.url, { mode: 'cors', credentials: 'omit' });
           if (res && res.status === 200) {
             cache.put(req.url, res.clone()).catch(() => {});
@@ -214,16 +210,13 @@ self.addEventListener('fetch', e => {
     return;
   }
 
-  // ===== Same-origin requests =====
   if (url.origin !== self.location.origin) return;
 
-  // version.json → luôn network (no-store)
   if (url.pathname.endsWith('/version.json')) {
     e.respondWith(fetch(req, { cache: 'no-store' }));
     return;
   }
 
-  // Static assets → cache-first
   if (_isStaticAsset(url.pathname)) {
     e.respondWith(
       caches.match(req, { ignoreSearch: true }).then(cached => {
@@ -242,7 +235,6 @@ self.addEventListener('fetch', e => {
     return;
   }
 
-  // Còn lại → network-first
   e.respondWith(
     fetch(req)
       .then(res => {
