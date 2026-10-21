@@ -1,6 +1,7 @@
 import { MAX_CANVAS_PX } from '../config.js';
 import { checkAborted } from './worker.js';
 
+// ==================== OTSU ====================
 function otsuThreshold(gray) {
   const hist = new Array(256).fill(0);
   for (let i = 0; i < gray.length; i++) hist[gray[i]]++;
@@ -23,6 +24,7 @@ function otsuThreshold(gray) {
   return threshold;
 }
 
+// ==================== PREPROCESSING ====================
 export async function preprocessImage(rawDataUrl, options = {}, signal) {
   checkAborted(signal);
   const { upscale = 2.0, useOtsu = true, threshold = 145, raw = false } = options;
@@ -32,6 +34,7 @@ export async function preprocessImage(rawDataUrl, options = {}, signal) {
     img.onload = () => {
       try {
         checkAborted(signal);
+        // Giới hạn diện tích canvas (iOS Safari ~16.7M px; vượt là canvas rỗng/crash) khi ảnh gốc lớn
         let scale = Math.min(4, upscale);
         const srcPx = img.width * img.height;
         if (srcPx * scale * scale > MAX_CANVAS_PX) scale = Math.sqrt(MAX_CANVAS_PX / srcPx);
@@ -47,11 +50,13 @@ export async function preprocessImage(rawDataUrl, options = {}, signal) {
         const data = imgData.data;
 
         if (raw) {
+          // Chỉ chuyển sang ảnh xám (không làm đen trắng) để giữ lại các nét mảnh
           for (let i = 0; i < data.length; i += 4) {
             const g = Math.round(data[i] * 0.299 + data[i+1] * 0.587 + data[i+2] * 0.114);
             data[i] = data[i+1] = data[i+2] = g;
           }
         } else {
+          // Dùng Otsu hoặc Threshold cố định để làm đen trắng (tăng độ tương phản)
           const gray = new Uint8Array(data.length / 4);
           for (let i = 0, j = 0; i < data.length; i += 4, j++) {
             gray[j] = Math.round(data[i] * 0.299 + data[i+1] * 0.587 + data[i+2] * 0.114);
@@ -66,7 +71,7 @@ export async function preprocessImage(rawDataUrl, options = {}, signal) {
 
         ctx.putImageData(imgData, 0, 0);
         const out = { dataUrl: canvas.toDataURL('image/png'), width: canvas.width, height: canvas.height };
-        canvas.width = canvas.height = 0;
+        canvas.width = canvas.height = 0; // Trả bộ nhớ canvas ngay (Safari giữ lại nếu không reset)
         resolve(out);
       } catch (e) { reject(e); }
     };
