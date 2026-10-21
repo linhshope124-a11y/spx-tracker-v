@@ -3,7 +3,8 @@ import {
   updateAllViews, renderHistory,
   getHistFilters, setHistFilters, resetHistFilters,
   hasActiveHistFilters,
-  renderAllOpportunitiesList
+  renderAllOpportunitiesList,
+  getMissedDatesList // <-- Import thêm hàm này
 } from './render.js';
 import { getTodayIso, getCurrentMonthIso, formatDateDisplay } from './utils.js';
 import { toggleTheme } from './theme.js';
@@ -66,7 +67,6 @@ export function switchModalSubTab(tabKey) {
   if (pane) pane.style.display = 'block';
 }
 
-// ================ OVERVIEW FILTER (deprecated) ================
 // ================ ALL OPPORTUNITIES MODAL ================
 export function openAllOpportunitiesModal() {
   const modal = document.getElementById('allOpportunitiesModal');
@@ -94,7 +94,7 @@ export function closeAllOpportunitiesModal() {
   if (modal) modal.classList.remove('active');
 }
 
-// ================ HISTORY FILTER — 4 nút cũ ================
+// ================ HISTORY FILTER ================
 export function setHistFilter(filter, btn) {
   state.histFilter = filter;
 
@@ -117,23 +117,17 @@ export function setHistFilter(filter, btn) {
   renderHistory();
 }
 
-// ================ HISTORY FILTER — nút Ngày ================
-/**
- * Mở date picker native → user chọn 1 ngày
- */
 export function openHistoryDatePicker() {
   const input = document.getElementById('historyDatePickerInput');
   if (!input) return;
 
   const f = getHistFilters();
 
-  // Nếu đang có ngày → bấm lần nữa = clear
   if (f.date) {
     clearHistoryDateFilter();
     return;
   }
 
-  // Set default = today hoặc ngày đầu tiên của tháng đang xem
   const today = getTodayIso();
   const cm = state.currentMonth || getCurrentMonthIso();
   const defaultDate = today.startsWith(cm) ? today : `${cm}-01`;
@@ -146,9 +140,6 @@ export function openHistoryDatePicker() {
   }
 }
 
-/**
- * Callback khi user chọn ngày trong date picker
- */
 export function applyHistoryDateFilter(value) {
   if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return;
 
@@ -156,13 +147,54 @@ export function applyHistoryDateFilter(value) {
   renderHistory();
 }
 
-/**
- * Clear filter ngày → về list theo tháng
- */
 export function clearHistoryDateFilter() {
   setHistFilters({ date: null });
   renderHistory();
 }
+
+// ================ MISSED DAYS MODAL (MỚI) ================
+export function openMissedDaysModal() {
+  const listEl = document.getElementById('missedDatesList');
+  if (!listEl) return;
+
+  const missed = getMissedDatesList();
+  
+  if (missed.length === 0) {
+    listEl.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-3);font-size:12px">Tuyệt vời! Không có ngày nào bị thiếu.</div>';
+  } else {
+    listEl.innerHTML = missed.map(d => `
+      <div class="missed-date-item">
+        <div class="missed-date-info">
+          <span class="missed-date-day">${String(d.day).padStart(2, '0')}/${String(d.month).padStart(2, '0')}/${d.year}</span>
+          <span class="missed-date-sub">${d.dayOfWeek}</span>
+        </div>
+        <div class="missed-date-actions">
+          <button class="btn-date-action btn-date-manual" onclick="handleMissedDateAction('manual', '${d.iso}')">✏️ Nhập</button>
+          <button class="btn-date-action btn-date-scan" onclick="handleMissedDateAction('scan', '${d.iso}')">📷 Quét</button>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  document.getElementById('missedDaysModal').classList.add('active');
+}
+
+export function closeMissedDaysModal() {
+  document.getElementById('missedDaysModal').classList.remove('active');
+}
+
+export function handleMissedDateAction(type, isoDate) {
+  closeMissedDaysModal();
+  
+  if (type === 'scan') {
+    if (typeof window.openOcrPicker === 'function') window.openOcrPicker();
+  } else {
+    openAddModal();
+    const dateInput = document.getElementById('inputDate');
+    if (dateInput) dateInput.value = isoDate;
+  }
+}
+// ================ /MISSED DAYS MODAL ================
 
 // ================ PERIOD BAR ================
 export function setPeriodMode(mode, el) {
@@ -351,7 +383,7 @@ function resetRankToNone() {
     p.classList.remove('long-pressing');
   });
   updateAllViews();
-  showToast('Đã bỏ chọn hạng thưởng tháng này', 'success', 1800);
+  showToast('Đã bỏ chọn hạng thưởng tháng này nhé!', 'success', 1800);
 }
 
 let _rankLongPressAttached = false;
@@ -431,9 +463,6 @@ export function updateMenuThemeUI() {
 // ================ AUTO-SAVE OCR TOGGLE ================
 const AUTOSAVE_OCR_KEY = 'spx_ocr_autosave';
 
-/**
- * Kiểm tra setting tự lưu OCR. Default = BẬT.
- */
 export function isAutoSaveOCR() {
   try {
     const v = localStorage.getItem(AUTOSAVE_OCR_KEY);
@@ -441,9 +470,6 @@ export function isAutoSaveOCR() {
   } catch { return true; }
 }
 
-/**
- * Ghi setting. Không cần refresh — ocr.js đọc trực tiếp mỗi lần tryAutoSave.
- */
 export function setAutoSaveOCR(enabled) {
   try {
     localStorage.setItem(AUTOSAVE_OCR_KEY, enabled ? '1' : '0');
@@ -451,38 +477,29 @@ export function setAutoSaveOCR(enabled) {
   updateMenuAutoSaveUI();
 }
 
-/**
- * Đảo trạng thái + toast.
- */
 export function toggleAutoSaveOCR() {
   const next = !isAutoSaveOCR();
   setAutoSaveOCR(next);
   showToast(
-    next ? '✅ Đã bật tự lưu OCR' : '⏸️ Đã tắt tự lưu OCR — phải xác nhận tay',
+    next ? '✅ Đã bật tự lưu ảnh quét' : '⏸️ Đã tắt tự lưu ảnh quét — bạn sẽ tự xác nhận kết quả',
     next ? 'success' : 'warning',
     2200
   );
   return next;
 }
 
-/**
- * Wrapper gọi từ menu — toggle + đóng menu.
- */
 export function toggleAutoSaveOCRFromMenu() {
   toggleAutoSaveOCR();
   closeMenuModal();
 }
 
-/**
- * Cập nhật text UI trong menu.
- */
 export function updateMenuAutoSaveUI() {
   const enabled = isAutoSaveOCR();
   const title = document.getElementById('menuAutoSaveTitle');
   const sub   = document.getElementById('menuAutoSaveSub');
-  if (title) title.innerText = enabled ? 'Tự lưu OCR: BẬT' : 'Tự lưu OCR: TẮT';
+  if (title) title.innerText = enabled ? 'Tự lưu ảnh quét: BẬT' : 'Tự lưu ảnh quét: TẮT';
   if (sub)   sub.innerText   = enabled
-    ? 'Tự động lưu khi OCR đọc đúng (score cao)'
+    ? 'Tự động lưu khi kết quả quét chính xác cao'
     : 'Đang tắt — phải xác nhận thủ công';
 }
 
@@ -514,7 +531,7 @@ export function openAddModal() {
 
 export function openEditModal(type, id) {
   const item = (state.appData[type] || []).find(r => r.id === id);
-  if (!item) { showToast('Không tìm thấy bản ghi', 'error'); return; }
+  if (!item) { showToast('Không tìm thấy bản ghi này', 'error'); return; }
 
   document.getElementById('modalTitle').innerText =
     `Sửa (${type === 'delivery' ? 'Giao' : type === 'pickup' ? 'Lấy' : 'Hoàn'})`;
@@ -558,7 +575,7 @@ export async function closeModal(force) {
     const isEditing = document.getElementById('editEntryId').value !== '';
     if (hasData && !isEditing) {
       const ok = await showConfirm(
-        'Bạn đang có dữ liệu chưa lưu.\n\nĐóng và bỏ qua?',
+        'Bạn đang có dữ liệu chưa lưu.\n\nĐóng và bỏ qua các thay đổi này?',
         {
           title: 'Dữ liệu chưa lưu',
           okText: 'Bỏ qua',
@@ -620,7 +637,7 @@ function _detectShareTargetStatus() {
       type: 'active',
       icon: '✅',
       title: 'Đã kích hoạt',
-      sub: 'Android Chrome hỗ trợ đầy đủ — share nhiều ảnh cùng lúc.'
+      sub: 'Android Chrome hỗ trợ đầy đủ — chia sẻ nhiều ảnh cùng lúc.'
     };
   }
 
@@ -707,8 +724,6 @@ export function showToast(message, type = 'success', duration = 2200) {
 
 // ================ HELPERS ================
 function clearAllConfidenceHighlightsLocal() {
-  // Cả hai banner cảnh báo OCR: nếu không xóa cả "fixWarningBanner", cảnh báo cũ sẽ dính lại
-  // khi mở form nhập/sửa thủ công sau một lần OCR có sửa số.
   ['distWarningBanner', 'fixWarningBanner'].forEach(id => {
     const b = document.getElementById(id);
     if (b) b.remove();
