@@ -126,18 +126,13 @@ function formatMissedDate(iso) {
 
 // ==================== NGÀY CHƯA CẬP NHẬT (tab Nhật ký) ====================
 /**
- * Số ngày CHƯA có bản ghi nào (Giao/Lấy/Hoàn) trong tháng đang xem.
- * - Tháng hiện tại: tính đến HÔM QUA (khớp banner nhắc ở Tổng quan; hôm nay ca làm chưa xong nên chưa tính).
- * - Tháng đã qua: cả tháng.
- * - Tháng tương lai, hoặc tháng chưa có bản ghi nào: 0 (không báo cho tháng chưa dùng app).
- * Ngày nghỉ cũng bị tính là "chưa cập nhật" vì app không biết lịch nghỉ.
- * @param {Date} [now] — chỉ để test
+ * Lấy mảng chi tiết các ngày bị thiếu trong tháng (kèm thứ trong tuần)
  */
-export function getMissedDaysInCurrentMonth(now = new Date()) {
+export function getMissedDatesList(now = new Date()) {
   const cm = state.currentMonth || getCurrentMonthIso();
   const [y, m] = cm.split('-').map(Number);
   const nowMonthIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  if (cm > nowMonthIso) return 0;
+  if (cm > nowMonthIso) return [];
 
   const recorded = new Set();
   ['delivery', 'pickup', 'return'].forEach(type => {
@@ -145,14 +140,33 @@ export function getMissedDaysInCurrentMonth(now = new Date()) {
       if (r.date.startsWith(cm + '-')) recorded.add(r.date);
     });
   });
-  if (recorded.size === 0) return 0;
+  if (recorded.size === 0) return [];
 
   const endDay = (cm === nowMonthIso) ? now.getDate() - 1 : new Date(y, m, 0).getDate();
-  let missed = 0;
+  const missed = [];
+  const daysOfWeek = ['Chủ Nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy'];
+
   for (let d = 1; d <= endDay; d++) {
-    if (!recorded.has(`${cm}-${String(d).padStart(2, '0')}`)) missed++;
+    const iso = `${cm}-${String(d).padStart(2, '0')}`;
+    if (!recorded.has(iso)) {
+      const dateObj = new Date(y, m - 1, d);
+      missed.push({
+        iso,
+        day: d,
+        month: m,
+        year: y,
+        dayOfWeek: daysOfWeek[dateObj.getDay()]
+      });
+    }
   }
   return missed;
+}
+
+/**
+ * Đếm tổng số ngày bị thiếu
+ */
+export function getMissedDaysInCurrentMonth(now = new Date()) {
+  return getMissedDatesList(now).length;
 }
 
 export function renderReminderBanner() {
@@ -383,7 +397,7 @@ function renderOverviewSuggestions(sorted) {
   if (!ovBox) return;
 
   if (sorted.length === 0) {
-    ovBox.innerHTML = `<div style="font-size:11.5px;color:var(--text-3);text-align:center;padding:16px">Không có cơ hội tăng điểm nào trong kỳ này</div>`;
+    ovBox.innerHTML = `<div style="font-size:11.5px;color:var(--text-3);text-align:center;padding:16px">Chưa có cơ hội tăng điểm nào trong kỳ này.</div>`;
     if (btnViewAll) btnViewAll.style.display = 'none';
     return;
   }
@@ -404,7 +418,7 @@ export function renderAllOpportunitiesList() {
   const filtered = _allOppCache.filter(o => o.type === _allOppFilter);
   if (filtered.length === 0) {
     const label = _allOppFilter === 'del' ? 'Giao' : _allOppFilter === 'pick' ? 'Lấy' : 'Hoàn';
-    box.innerHTML = `<div style="font-size:12px;color:var(--text-3);text-align:center;padding:24px 16px">Không có cơ hội tăng điểm cho loại ${label}</div>`;
+    box.innerHTML = `<div style="font-size:12px;color:var(--text-3);text-align:center;padding:24px 16px">Không có cơ hội tăng điểm cho mục ${label}.</div>`;
     return;
   }
   box.innerHTML = filtered.map(o => o.html).join('');
@@ -513,7 +527,7 @@ function _updateAllViews() {
     const ovBox = document.getElementById('overviewMilestoneList');
     const btnViewAll = document.getElementById('viewAllOpportunitiesBtn');
     if (ovBox) {
-      ovBox.innerHTML = `<div style="font-size:11.5px;color:var(--text-3);text-align:center;padding:16px">Chưa có dữ liệu kỳ này. Bấm menu → Nhập sản lượng để bắt đầu.</div>`;
+      ovBox.innerHTML = `<div style="font-size:11.5px;color:var(--text-3);text-align:center;padding:16px">Chưa có dữ liệu kỳ này. Hãy quét ảnh hoặc nhập sản lượng để bắt đầu nhé!</div>`;
     }
     if (btnViewAll) btnViewAll.style.display = 'none';
   } else {
@@ -683,9 +697,10 @@ export function renderHistory() {
     dateBtn.classList.toggle('active', !!f.date);
   }
 
-  // Banner "chưa cập nhật N ngày" (ẩn khi đang xem chi tiết 1 ngày) + nhãn nút xóa tháng
+  // Banner "chưa cập nhật N ngày" (ẩn khi đang xem chi tiết 1 ngày)
   const missedBanner = document.getElementById('missedDaysBanner');
   const missedText = document.getElementById('missedDaysText');
+  
   if (missedBanner && missedText) {
     const missedCount = getHistFilters().date ? 0 : getMissedDaysInCurrentMonth();
     if (missedCount > 0) {
@@ -695,6 +710,7 @@ export function renderHistory() {
       missedBanner.style.display = 'none';
     }
   }
+
   const btnDeleteMonth = document.getElementById('btnDeleteMonth');
   if (btnDeleteMonth) {
     const [by, bm] = (state.currentMonth || getCurrentMonthIso()).split('-');
@@ -715,8 +731,8 @@ export function renderHistory() {
 
   if (list.length === 0) {
     const emptyMsg = hasActiveHistFilters()
-      ? 'Không có bản ghi khớp bộ lọc hiện tại.'
-      : 'Chưa có bản ghi nào trong kỳ được chọn.';
+      ? 'Không có bản ghi nào khớp bộ lọc.'
+      : 'Chưa có bản ghi nào trong kỳ này.';
     container.innerHTML = `<div style="font-size:11.5px;color:var(--text-3);text-align:center;padding:20px">${emptyMsg}</div>`;
     return;
   }
