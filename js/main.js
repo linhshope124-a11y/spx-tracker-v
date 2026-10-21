@@ -20,7 +20,8 @@ import {
   openHistoryDatePicker, applyHistoryDateFilter, clearHistoryDateFilter,
   openAllOpportunitiesModal, closeAllOpportunitiesModal,
   showToast,
-  isAutoSaveOCR, setAutoSaveOCR, toggleAutoSaveOCR, toggleAutoSaveOCRFromMenu
+  isAutoSaveOCR, setAutoSaveOCR, toggleAutoSaveOCR, toggleAutoSaveOCRFromMenu,
+  openMissedDaysModal, closeMissedDaysModal, handleMissedDateAction // <-- Import thêm 3 hàm mới
 } from './ui.js';
 import {
   handleOcrImage, preloadTesseractWorker,
@@ -99,7 +100,7 @@ function _findDuplicates() {
 async function _cleanupDuplicates() {
   const dups = _findDuplicates();
   if (dups.length === 0) {
-    await showAlert('Không có bản ghi trùng lặp!', { title: 'Không tìm thấy', okText: 'Đã hiểu' });
+    await showAlert('Tuyệt vời! Không có bản ghi nào bị trùng lặp.', { title: 'Thông báo', okText: 'Đóng' });
     return;
   }
   const summary = { Giao: 0, Lấy: 0, Hoàn: 0 };
@@ -149,7 +150,7 @@ async function _clearOcrCacheFromSettings() {
     await _updateOcrCacheStats();
   } catch (e) {
     console.error('[OCR Cache] Lỗi xóa:', e);
-    await showAlert('Không xóa được cache: ' + e.message, { title: 'Lỗi', okText: 'Đóng' });
+    await showAlert('Không xóa được cache quét ảnh: ' + e.message, { title: 'Lỗi', okText: 'Đóng' });
   }
 }
 
@@ -179,7 +180,7 @@ function _showIncomeInfo() {
     '• Miền Trung: ≥60 = 1 công, ≥30 = 0.5 công\n' +
     '• TP.HCM & HN: ≥80 = 1 công, ≥40 = 0.5 công\n\n' +
     '⚡ Lương được lưu RIÊNG theo từng tháng.\n' +
-    'Chuyển tháng để cấu hình tháng đó.',
+    'Chuyển tháng để cấu hình tháng đó nhé.',
     { title: 'Cách tính thu nhập', okText: 'Đã hiểu' }
   );
 }
@@ -198,7 +199,7 @@ function _openOcrPicker() {
 
 // ================ AUTO-UPDATE ================
 let swRegistration = null;
-let currentAppVersion = document.querySelector('meta[name=\"spx-app-version\"]')?.content || null;
+let currentAppVersion = document.querySelector('meta[name="spx-app-version"]')?.content || null;
 let waitingWorker = null;
 
 async function registerSW() {
@@ -234,7 +235,7 @@ async function checkVersion(manual = false) {
   try {
     const res = await fetch(`./version.json?t=${Date.now()}`, { cache: 'no-store' });
     if (!res.ok) {
-      if (manual) showToast('⚠️ Không kiểm tra được — thử lại sau', 'warning', 2500);
+      if (manual) showToast('⚠️ Không kiểm tra được — thử lại sau nhé', 'warning', 2500);
       return;
     }
     const data = await res.json();
@@ -262,10 +263,10 @@ async function checkVersion(manual = false) {
       showUpdateBanner(serverVersion);
       if (manual) showToast(`🎉 Có bản mới ${serverVersion}!`, 'success', 2500);
     } else if (manual) {
-      showToast(`✅ Đã là bản mới nhất (${serverVersion})`, 'success', 2500);
+      showToast(`✅ Bạn đang dùng bản mới nhất (${serverVersion})`, 'success', 2500);
     }
   } catch (e) {
-    if (manual) showToast('⚠️ Không kiểm tra được — kiểm tra mạng', 'warning', 2500);
+    if (manual) showToast('⚠️ Không kiểm tra được — kiểm tra kết nối mạng nhé', 'warning', 2500);
   }
 }
 
@@ -414,15 +415,15 @@ async function _runShareTargetIfNeeded() {
     console.warn('[ShareTarget] Không có file trong cache');
     showAlert(
       'Không đọc được ảnh từ chia sẻ.\n\n' +
-      'Hãy:\n' +
-      '• Share lại từ Gallery\n' +
+      'Hãy thử:\n' +
+      '• Chia sẻ lại từ Thư viện ảnh\n' +
       '• Hoặc mở app → bấm 📷 để chọn ảnh thủ công',
       { title: '📤 Chia sẻ ảnh', okText: 'Đã hiểu' }
     );
     return;
   }
 
-  console.log(`[ShareTarget] Nhận ${files.length} file — bắt đầu OCR`);
+  console.log(`[ShareTarget] Nhận ${files.length} file — bắt đầu quét`);
   try {
     await handleSharedImage(files);
   } catch (e) {
@@ -473,6 +474,11 @@ Object.assign(window, {
   setAllOppFilter,
 
   openOcrPicker: _openOcrPicker,
+
+  // MISSED DAYS MODAL
+  openMissedDaysModal,
+  closeMissedDaysModal,
+  handleMissedDateAction,
 
   // REGION
   changeRegion: function(regionKey, el) {
@@ -532,7 +538,7 @@ Object.assign(window, {
 
     const [y, m] = state.currentMonth.split('-');
     const taiXeNote = taiXe > 0
-      ? `\n⚡ Tài xế chỉ được cộng khi đơn Giao ≥ 1.500/tháng.`
+      ? `\n⚡ Nhớ nhé: Tài xế chỉ được cộng khi đơn Giao ≥ 1.500/tháng.`
       : '';
 
     showAlert(
@@ -542,7 +548,7 @@ Object.assign(window, {
       `• Tài xế:  ${taiXe.toLocaleString('vi-VN')}\n` +
       `• Khu vực: ${state.region === 'hcm_hn' ? 'TP.HCM & HN' : 'Miền Trung'}` +
       taiXeNote,
-      { title: 'Đã lưu cấu hình', okText: 'OK' }
+      { title: 'Đã lưu cấu hình', okText: 'Tuyệt vời' }
     );
   },
 
@@ -569,7 +575,7 @@ let _storageWarned = false;
 window.addEventListener('spx:storage-error', () => {
   if (_storageWarned) return;
   _storageWarned = true;
-  showAlert('Bộ nhớ thiết bị đầy hoặc bị chặn — số liệu mới CHƯA được lưu.\n\nHãy xuất file sao lưu rồi giải phóng bộ nhớ.',
+  showAlert('Bộ nhớ thiết bị đầy hoặc bị chặn — số liệu mới CHƯA được lưu.\n\nHãy xuất file sao lưu rồi giải phóng bộ nhớ nhé.',
     { title: '⚠️ Không lưu được', okText: 'Đã hiểu' });
 });
 
@@ -579,14 +585,12 @@ function _handleShortcutLaunch() {
     const url = new URL(window.location.href);
     const action = url.searchParams.get('action');
     if (action !== 'ocr' && action !== 'history') return;
-    // Remove query after reading it so refresh does not repeat the shortcut action.
     url.searchParams.delete('action');
     window.history.replaceState({}, '', url.pathname + url.search + url.hash);
     if (action === 'history') {
       openHistoryTab();
       return;
     }
-    // Run synchronously after initial render to maximize compatibility with file-picker gesture rules.
     _openOcrPicker();
   } catch (e) {
     console.warn('[PWA] Không xử lý được shortcut:', e);
@@ -621,8 +625,7 @@ function _handleShortcutLaunch() {
   _runShareTargetIfNeeded();
   _handleShortcutLaunch();
 
-  // ⭐ AUTO BACKUP CHECK — sau 5 giây (đợi app render xong)
-  // Nếu đang bận (form/modal đang mở hoặc OCR đang chạy) thì lùi lại 60 giây, tối đa 5 lần — tránh hộp thoại bật đè lúc đang nhập
+  // ⭐ AUTO BACKUP CHECK — sau 5 giây
   const _tryAutoBackup = (left) => {
     const busy = document.querySelector('.modal-shade.active') ||
                  document.getElementById('ocrLoadingOverlay')?.style.display === 'flex';
