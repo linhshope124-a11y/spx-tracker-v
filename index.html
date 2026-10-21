@@ -6,14 +6,14 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#ff5722">
-<meta name="spx-app-version" content="v2.4">
+<meta name="spx-app-version" content="v2.5">
 <meta name="description" content="Theo dõi sản lượng giao/lấy/hoàn và tính điểm SPX">
 <title>Theo Dõi Sản Lượng & Điểm SPX</title>
 <link rel="manifest" href="./manifest.json">
 <link rel="apple-touch-icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxOTIgMTkyIj48cmVjdCB3aWR0aD0iMTkyIiBoZWlnaHQ9IjE5MiIgcng9IjM4IiBmaWxsPSIjZmY1NzIyIi8+PHRleHQgeD0iOTYiIHk9IjExNSIgZm9udC1zaXplPSI4OCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmaWxsPSIjZmZmIiBmb250LXdlaWdodD0iYm9sZCI+U1BYPC90ZXh0Pjwvc3ZnPg==">
 <meta name="apple-mobile-web-app-title" content="SPX Tracker">
 <script>
-  // Aplica o tema antes de pintar a tela para evitar o flash do tema claro.
+  // Áp dụng giao diện trước khi vẽ để tránh chớp trắng
   (function () {
     try {
       var theme = localStorage.getItem('spx_theme') || localStorage.getItem('theme') || 'light';
@@ -468,18 +468,22 @@
             <button class="filter-btn filter-btn-date" id="histFilterDateBtn" onclick="openHistoryDatePicker()">📅 Ngày</button>
           </div>
 
-          <!-- Banner: số ngày trong tháng chưa có bản ghi (ẩn khi đang lọc theo 1 ngày hoặc không có ngày sót) -->
+          <!-- Banner: số ngày trong tháng chưa có bản ghi -->
           <div id="missedDaysBanner" class="missed-days-banner" style="display:none;">
-            <div class="missed-days-content">
+            <!-- Bấm vào vùng text để mở Modal -->
+            <div class="missed-days-content" onclick="openMissedDaysModal()" style="cursor: pointer; flex: 1;">
               <span class="missed-days-icon">⚠️</span>
               <span id="missedDaysText" class="missed-days-text">Chưa cập nhật</span>
             </div>
-            <button type="button" class="btn" onclick="openAddModal()" style="padding: 6px 12px; font-size: 11.5px; white-space: nowrap; border:1px solid var(--warning); background:var(--warning); color:#fff;">+ Nhập bù</button>
+            <!-- Bấm nút này để mở Quét ảnh luôn -->
+            <button type="button" class="btn btn-primary" onclick="openOcrPicker()" style="padding: 6px 12px; font-size: 11.5px; white-space: nowrap; border-radius: 8px;">
+              📷 Quét ngay
+            </button>
           </div>
 
           <div id="historyEntries"></div>
 
-          <!-- Xóa toàn bộ dữ liệu của tháng đang xem (nhãn tháng được render.js cập nhật) -->
+          <!-- Xóa toàn bộ dữ liệu của tháng đang xem -->
           <button type="button" class="btn-delete-month" id="btnDeleteMonth" onclick="deleteCurrentMonthHistory()">
             🗑️ Xóa dữ liệu tháng này
           </button>
@@ -594,8 +598,8 @@
           </svg>
         </span>
         <div class="menu-text">
-          <div class="menu-title">Backup & Cloud</div>
-          <div class="menu-sub">Đồng bộ Gist · JSON · Dọn trùng</div>
+          <div class="menu-title">Sao lưu & Đồng bộ Cloud</div>
+          <div class="menu-sub">Lưu trữ Gist · File JSON · Dọn trùng</div>
         </div>
       </button>
 
@@ -637,7 +641,7 @@
         </span>
         <div class="menu-text">
           <div class="menu-title">📤 Chia sẻ ảnh</div>
-          <div class="menu-sub">Share từ Gallery → OCR tự động</div>
+          <div class="menu-sub">Chia sẻ từ Thư viện ảnh → Tự động quét</div>
         </div>
       </button>
 
@@ -796,7 +800,7 @@
 <div class="modal-shade" id="settingsModal" onclick="if(event.target===this)closeSettingsModal()">
   <div class="modal-box" role="dialog" aria-modal="true" aria-label="Hộp thoại">
     <div class="modal-box-head">
-      <h3>Backup & Quản lý</h3>
+      <h3>Sao lưu & Quản lý</h3>
       <button class="modal-close-btn" onclick="closeSettingsModal()" aria-label="Đóng">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
           <line x1="18" y1="6" x2="6" y2="18"/>
@@ -806,7 +810,7 @@
     </div>
     <div class="modal-body">
 
-      <div class="settings-section-title">☁️ Cloud Backup (GitHub Gist)</div>
+      <div class="settings-section-title">☁️ Đồng bộ Cloud (GitHub Gist)</div>
       <p class="settings-hint">Tự động lưu lên Cloud — reset máy không mất dữ liệu.</p>
 
       <label class="settings-label">GitHub Token</label>
@@ -819,7 +823,7 @@
         </button>
       </div>
 
-      <label class="settings-label" style="margin-top:12px">Gist ID</label>
+      <label class="settings-label" style="margin-top:12px">Gist ID (Mã Cloud)</label>
       <input type="text" id="gistIdInput" class="input-control" placeholder="Tự động sau lần backup đầu" style="font-family:'JetBrains Mono',monospace;font-size:12px">
 
       <label class="settings-checkbox">
@@ -864,10 +868,10 @@
       </button>
 
       <div style="margin-top:10px">
-        <div class="settings-section-title" style="font-size:12px;margin-bottom:4px">📷 Cache OCR</div>
+        <div class="settings-section-title" style="font-size:12px;margin-bottom:4px">📷 Dữ liệu quét ảnh tạm</div>
         <p class="settings-hint" id="ocrCacheStats" style="margin-bottom:8px;font-family:'JetBrains Mono',monospace;font-size:11px">Đang đọc...</p>
         <button class="btn" onclick="clearOcrCacheFromSettings()" style="width:100%;background:var(--warning-bg);border-color:var(--warning-bd);color:var(--warning);font-weight:600">
-          🗑️ Xóa cache OCR
+          🗑️ Xóa cache quét ảnh
         </button>
       </div>
 
@@ -973,7 +977,7 @@
       </div>
 
       <div class="share-intro">
-        Sau khi cài app, bạn có thể <b>share ảnh chụp màn hình SPX</b> trực tiếp từ Gallery vào app — OCR sẽ tự chạy, không cần mở app rồi chọn ảnh lại.
+        Sau khi cài app, bạn có thể <b>chia sẻ ảnh chụp màn hình SPX</b> trực tiếp từ Thư viện ảnh vào app — Quét ảnh sẽ tự chạy, không cần mở app rồi chọn ảnh lại.
       </div>
 
       <div class="share-steps">
@@ -987,23 +991,23 @@
         </div>
         <div class="share-step">
           <div class="share-step-num">3</div>
-          <div class="share-step-text">Mở <b>Gallery / Ảnh</b> → chọn ảnh vừa chụp</div>
+          <div class="share-step-text">Mở <b>Thư viện ảnh / Ảnh</b> → chọn ảnh vừa chụp</div>
         </div>
         <div class="share-step">
           <div class="share-step-num">4</div>
-          <div class="share-step-text">Bấm <b>Chia sẻ (Share)</b> → chọn <b>SPX Tracker</b> trong danh sách</div>
+          <div class="share-step-text">Bấm <b>Chia sẻ</b> → chọn <b>SPX Tracker</b> trong danh sách</div>
         </div>
         <div class="share-step">
           <div class="share-step-num">5</div>
-          <div class="share-step-text">App tự mở + tự OCR ngay 🎉 <span class="share-step-hint">Không cần chọn ảnh lại</span></div>
+          <div class="share-step-text">App tự mở + tự quét ngay 🎉 <span class="share-step-hint">Không cần chọn ảnh lại</span></div>
         </div>
       </div>
 
       <div class="share-note">
         <div class="share-note-title">💡 Lưu ý tương thích</div>
-        <div class="share-note-row"><span class="share-note-badge ok">OK</span> Android Chrome — hỗ trợ đầy đủ, share nhiều ảnh cùng lúc</div>
+        <div class="share-note-row"><span class="share-note-badge ok">OK</span> Android Chrome — hỗ trợ đầy đủ, chia sẻ nhiều ảnh cùng lúc</div>
         <div class="share-note-row"><span class="share-note-badge warn">LIMIT</span> iOS Safari 17+ — hỗ trợ <b>hạn chế</b>, chỉ 1 ảnh/lần</div>
-        <div class="share-note-row"><span class="share-note-badge warn">N/A</span> Desktop — chưa hỗ trợ share_target</div>
+        <div class="share-note-row"><span class="share-note-badge warn">N/A</span> Desktop — chưa hỗ trợ chia sẻ ảnh</div>
         <div class="share-note-row"><span class="share-note-badge req">PWA</span> Chỉ hoạt động khi app đã <b>cài</b> vào màn hình chính</div>
       </div>
 
@@ -1035,6 +1039,27 @@
     </div>
     <div class="modal-box-foot">
       <button class="btn btn-primary" onclick="closeAllOpportunitiesModal()" style="width:100%">Đóng</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Danh sách ngày chưa cập nhật -->
+<div class="modal-shade" id="missedDaysModal" onclick="if(event.target===this)closeMissedDaysModal()">
+  <div class="modal-box" role="dialog" aria-modal="true" aria-label="Ngày chưa cập nhật">
+    <div class="modal-box-head">
+      <h3>Các ngày chưa cập nhật</h3>
+      <button class="modal-close-btn" onclick="closeMissedDaysModal()" aria-label="Đóng">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <line x1="18" y1="6" x2="6" y2="18"/>
+          <line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size: 12px; color: var(--text-2); margin-bottom: 14px;">Chọn ngày để quét ảnh hoặc nhập tay bù số liệu.</p>
+      <div class="missed-dates-list" id="missedDatesList">
+        <!-- Render bằng JS -->
+      </div>
     </div>
   </div>
 </div>
@@ -1080,4 +1105,4 @@
 
 <script type="module" src="./js/main.js"></script>
 </body>
-</html>
+  </html>
