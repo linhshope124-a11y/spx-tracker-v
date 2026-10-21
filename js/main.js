@@ -32,7 +32,7 @@ import {
   clearOcrCache, getOcrCacheStats,
   initOcrCache, refreshOcrCacheStats,
   handleSharedImage
-} from './ocr.js';
+} from './ocr/index.js';
 import { saveRecord, deleteRecord, clearAllHistory, deleteCurrentMonthHistory } from './entry.js';
 import {
   copyDataJson, openPasteJsonModal, closePasteJsonModal,
