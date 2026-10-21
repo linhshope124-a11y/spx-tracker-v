@@ -9,6 +9,8 @@ const RANGE_DEFS = [
 
 export function identifyRangeKey(minV, maxV) {
   for (const d of RANGE_DEFS) { if (d.min === minV && d.max === maxV) return d.key; }
+  // Fallback: OCR đọc sai số cuối của dải (vd "12 - 16"). Chỉ chấp nhận khi hai số cách nhau
+  // hợp lý (≤ 4), tránh nhận nhầm các cặp số cách xa nhau thành dải cân.
   const span = maxV - minV;
   const plausible = (span >= 1 && span <= 4) || (minV === 15 && maxV >= 15);
   if (!plausible) return null;
@@ -19,13 +21,20 @@ export function identifyRangeKey(minV, maxV) {
 export function parseOcrText(cleanText) {
   const weights = { '0_2':0,'2_4':0,'4_6':0,'6_8':0,'8_10':0,'10_12':0,'12_15':0,'over_15':0 };
   const confidences = {};
-  const text = cleanText.replace(/[–—]/g, '-').replace(/,/g, '.').replace(/[¡ÌÍ]/g, '1')
-    .split('\n').filter(line => {
+  
+  // FIX 1: Thêm Ì, Í vào replace (OCR đọc số 1 thành Ì)
+  const text = cleanText
+    .replace(/[–—]/g, '-')
+    .replace(/,/g, '.')
+    .replace(/[¡ÌÍ]/g, '1')
+    .split('\n')
+    .filter(line => {
       if (/\b\d{1,2}:\d{2}\b/.test(line)) return false;
       if (/^\s*\d{4,}/.test(line)) return false;
       if (/Ch[iỉ]\s*ti[eế]t/i.test(line)) return false;
       return true;
-    }).join('\n');
+    })
+    .join('\n');
 
   const totalRegex = /T[oôổ]ng\s*[:\-]?\s*(\d{1,6})/i;
   const totalMatch = text.match(totalRegex);
@@ -36,6 +45,7 @@ export function parseOcrText(cleanText) {
   const ranges = [];
   let m;
   while ((m = rangeRegex.exec(text)) !== null) {
+    // Số có số 0 đứng đầu ("06-10") là ngày/tháng chứ không phải dải cân
     if (/^0\d/.test(m[1]) || /^0\d/.test(m[2])) continue;
     const minV = parseInt(m[1], 10);
     const maxV = parseInt(m[2], 10);
@@ -47,10 +57,11 @@ export function parseOcrText(cleanText) {
   const totalPos = totalMatch ? totalMatch.index : -1;
   const totalEnd = totalMatch ? totalMatch.index + totalMatch[0].length : -1;
 
+  // FIX 2: donRegex accept ¡ Ì Í l I | khi đứng trước "Đơn"
   const donNums = [];
   const donRegex = /([\d¡ÌÍlI|]{1,5})\s*[ĐDđdB]\s*[ơo]n\b/gi;
   while ((m = donRegex.exec(text)) !== null) {
-    if (!/[ĐDB]/.test(m[0])) continue;
+    if (!/[ĐDB]/.test(m[0])) continue; // chữ thường = dòng "Tổng N đơn hàng", không phải thẻ
     const cleaned = m[1].replace(/[¡ÌÍlI|]/g, '1');
     const val = parseInt(cleaned, 10);
     if (!Number.isFinite(val)) continue;
@@ -73,6 +84,7 @@ export function parseOcrText(cleanText) {
     if (totalPos >= 0 && pos >= totalPos && pos <= totalEnd + 3) continue;
     if (val === 0) continue;
     if (val > 99999) continue;
+    // FIX 3: Bỏ số dính chữ (h2, ab3) — nhưng CHO PHÉP nếu ký tự trước là "h" và theo sau là "Đơn"
     if (pos > 0 && /[A-Za-zÀ-ỹ]/.test(text[pos - 1])) {
       const beforeChar = text[pos - 1];
       const afterText = text.slice(endPos, endPos + 12);
