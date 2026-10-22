@@ -5,7 +5,7 @@
 // ⚠️ MỖI LẦN SỬA FILE TRONG CORE → BUMP CACHE VERSION
 // =============================================================
 
-const CACHE       = 'spx-tracker-v2.7';    // v2.6 (Cập nhật cấu trúc OCR)
+const CACHE       = 'spx-tracker-v2.8';    // v2.8: sửa trang HDSD, đồng bộ version và hoàn thiện kiểm tra tài nguyên
 const TESS_CACHE  = 'spx-tesseract-v1';    // giữ nguyên — Tesseract không đổi
 const SHARE_CACHE = 'spx-shared-files';    // giữ nguyên — dữ liệu tạm
 
@@ -20,6 +20,9 @@ const CORE = [
   './icons/icon-maskable-512.png',
   './css/style.css',
   './js/main.js',
+  './js/entry.js',
+  './js/fee-table.js',
+  './js/charts.js',
   './js/config.js',
   './js/utils.js',
   './js/state.js',
