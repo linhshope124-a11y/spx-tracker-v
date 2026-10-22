@@ -1,59 +1,1078 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="vi">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#ff5722">
-  <meta name="description" content="Hướng dẫn sử dụng SPX Tracker: nhập liệu, quét OCR, nhật ký và sao lưu dữ liệu.">
-  <title>Hướng dẫn sử dụng — SPX Tracker</title>
-  <style>
-    :root{color-scheme:dark;--bg:#0e1117;--panel:#171c24;--line:#303744;--text:#edf1f7;--muted:#a6b0bf;--accent:#ff5722;--soft:#242b35}
-    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.65 system-ui,-apple-system,"Segoe UI",sans-serif}
-    header{position:sticky;top:0;z-index:2;background:rgba(14,17,23,.95);border-bottom:1px solid var(--line);padding:14px max(18px,calc((100% - 900px)/2));backdrop-filter:blur(10px)}
-    .top{display:flex;align-items:center;justify-content:space-between;gap:12px}.brand{font-weight:800}.back{display:inline-block;padding:9px 13px;border-radius:10px;background:var(--accent);color:#fff;text-decoration:none;font-weight:700;white-space:nowrap}
-    main{max-width:900px;margin:0 auto;padding:24px 18px 64px}h1{font-size:clamp(28px,5vw,40px);line-height:1.2;margin:12px 0}h2{font-size:22px;margin:0 0 10px}h3{font-size:17px;margin:16px 0 5px}.intro{color:var(--muted);margin-bottom:24px}
-    section{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:20px;margin:14px 0}p{margin:8px 0}ul,ol{padding-left:23px}li{margin:5px 0}.note{padding:12px 14px;background:var(--soft);border-left:3px solid var(--accent);border-radius:8px;color:var(--muted)}kbd,code{background:var(--soft);padding:2px 6px;border-radius:5px}a{color:#ff9b7d}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.tile{background:var(--soft);border-radius:10px;padding:12px}.tile strong{display:block;margin-bottom:4px}@media(max-width:600px){header{padding:12px 14px}main{padding:18px 12px 40px}.grid{grid-template-columns:1fr}section{padding:16px}}
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#ff5722">
+<meta name="spx-app-version" content="v2.8">
+<meta name="description" content="Hướng dẫn sử dụng SPX Tracker">
+<title>Hướng dẫn — SPX Tracker</title>
+<!-- Font hệ thống: không chặn render và không phụ thuộc mạng. -->
+<style>
+:root {
+  --bg: #f8fafc; --surface: #ffffff; --surface-2: #f1f5f9; --border: #e5e7eb;
+  --text-1: #0f172a; --text-2: #475569; --text-3: #94a3b8;
+  --accent: #ff5722; --accent-soft: #fff1eb; --accent-border: #ffd5c2;
+  --success: #059669; --success-bg: #ecfdf5; --success-bd: #a7f3d0;
+  --warning: #d97706; --warning-bg: #fffbeb; --warning-bd: #fde68a;
+  --danger: #dc2626; --danger-bg: #fef2f2; --danger-bd: #fecaca;
+  --info: #2563eb; --info-bg: #eff6ff; --info-bd: #bfdbfe;
+  --new: #10b981; --new-bg: #ecfdf5; --new-bd: #a7f3d0;
+  --hot: #ef4444; --hot-bg: #fef2f2; --hot-bd: #fecaca;
+}
+[data-theme="dark"] {
+  --bg: #0d1117; --surface: #161b22; --surface-2: #21262d; --border: #30363d;
+  --text-1: #e6edf3; --text-2: #adbac7; --text-3: #768390;
+  --accent: #ff6e40; --accent-soft: rgba(255,110,64,0.12); --accent-border: rgba(255,110,64,0.3);
+  --success: #3fb950; --success-bg: rgba(63,185,80,0.12); --success-bd: rgba(63,185,80,0.3);
+  --warning: #d29922; --warning-bg: rgba(210,153,34,0.12); --warning-bd: rgba(210,153,34,0.3);
+  --danger: #f85149; --danger-bg: rgba(248,81,73,0.12); --danger-bd: rgba(248,81,73,0.3);
+  --info: #58a6ff; --info-bg: rgba(88,166,255,0.12); --info-bd: rgba(88,166,255,0.3);
+  --new: #3fb950; --new-bg: rgba(63,185,80,0.12); --new-bd: rgba(63,185,80,0.3);
+  --hot: #f85149; --hot-bg: rgba(248,81,73,0.12); --hot-bd: rgba(248,81,73,0.3);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+html { scroll-behavior: smooth; }
+body {
+  background: var(--bg); color: var(--text-1);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  font-size: 14px; line-height: 1.6; -webkit-font-smoothing: antialiased;
+  padding-bottom: 40px;
+}
+
+/* ============ HEADER ============ */
+.g-header {
+  position: sticky; top: 0; z-index: 50; background: var(--bg);
+  padding: 12px 16px 8px; padding-top: calc(12px + env(safe-area-inset-top, 0px));
+  max-width: 700px; margin: 0 auto; border-bottom: 1px solid var(--border);
+}
+.g-header-inner {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
+  padding: 8px 10px; display: flex; align-items: center; gap: 10px;
+  box-shadow: 0 2px 14px rgba(15,23,42,0.06);
+}
+[data-theme="dark"] .g-header-inner { box-shadow: 0 2px 14px rgba(0,0,0,0.35); }
+.g-back-btn {
+  width: 40px; height: 40px; flex-shrink: 0; display: inline-flex;
+  align-items: center; justify-content: center; background: var(--surface-2);
+  border: 1px solid var(--border); border-radius: 12px; cursor: pointer;
+  color: var(--text-1); text-decoration: none; transition: all 0.15s;
+}
+.g-back-btn:active { transform: scale(0.94); }
+.g-back-btn svg { width: 20px; height: 20px; }
+.g-title { flex: 1; font-size: 14.5px; font-weight: 700; letter-spacing: -0.015em; }
+.g-search-toggle {
+  width: 40px; height: 40px; flex-shrink: 0; display: inline-flex;
+  align-items: center; justify-content: center; background: var(--surface-2);
+  border: 1px solid var(--border); border-radius: 12px; cursor: pointer;
+  color: var(--text-1); transition: all 0.15s;
+}
+.g-search-toggle:active { transform: scale(0.94); }
+.g-search-toggle.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.g-search-toggle svg { width: 18px; height: 18px; }
+
+/* ============ SEARCH BAR ============ */
+.g-search-wrap {
+  max-width: 700px; margin: 0 auto;
+  max-height: 0; overflow: hidden;
+  transition: max-height 0.25s ease-out, padding 0.25s ease-out, opacity 0.2s;
+  opacity: 0;
+  padding: 0 16px;
+}
+.g-search-wrap.active {
+  max-height: 80px; opacity: 1; padding: 12px 16px 4px;
+}
+.g-search-inner {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  padding: 10px 14px; display: flex; align-items: center; gap: 10px;
+}
+.g-search-inner svg { width: 16px; height: 16px; color: var(--text-3); flex-shrink: 0; }
+.g-search-input {
+  flex: 1; border: none; background: transparent; outline: none;
+  color: var(--text-1); font-size: 14px; font-family: inherit;
+}
+.g-search-input::placeholder { color: var(--text-3); }
+.g-search-clear {
+  width: 22px; height: 22px; border: none; background: var(--surface-2);
+  border-radius: 50%; cursor: pointer; color: var(--text-3); font-size: 14px;
+  display: none; align-items: center; justify-content: center; padding: 0;
+  font-family: inherit; line-height: 1;
+}
+.g-search-clear.show { display: inline-flex; }
+
+/* ============ SHELL ============ */
+.g-shell { max-width: 700px; margin: 0 auto; padding: 0 16px; }
+
+/* ============ HERO QUICK START ============ */
+.g-quick {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
+  padding: 18px; margin-top: 14px; position: relative; overflow: hidden;
+  background-image: radial-gradient(140% 100% at 100% 0%, var(--accent-soft) 0%, transparent 55%);
+}
+.g-quick::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+  background: linear-gradient(90deg, var(--accent) 0%, #ea4512 60%, var(--accent) 100%);
+}
+.g-quick-title {
+  font-size: 16px; font-weight: 800; letter-spacing: -0.02em;
+  display: flex; align-items: center; gap: 8px; margin-bottom: 4px;
+}
+.g-quick-sub { font-size: 12.5px; color: var(--text-3); font-weight: 500; margin-bottom: 14px; }
+.g-quick-steps { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+.g-quick-step {
+  display: flex; align-items: flex-start; gap: 10px;
+  font-size: 13px; color: var(--text-2); line-height: 1.5;
+}
+.g-quick-num {
+  width: 22px; height: 22px; flex-shrink: 0; display: inline-flex;
+  align-items: center; justify-content: center; background: var(--accent); color: #fff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-weight: 800; font-size: 11px;
+  border-radius: 50%; line-height: 1;
+}
+.g-quick-step b { color: var(--text-1); font-weight: 700; }
+.g-quick-cta {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  width: 100%; padding: 11px 16px; background: var(--accent); color: #fff;
+  border: none; border-radius: 10px; font-size: 13px; font-weight: 700;
+  font-family: inherit; cursor: pointer; text-decoration: none;
+  box-shadow: 0 2px 8px rgba(255,87,34,0.25);
+  transition: all 0.15s;
+}
+.g-quick-cta:active { transform: scale(0.97); }
+
+/* ============ GROUPS ============ */
+.g-group { margin-top: 24px; }
+.g-group-head {
+  font-size: 11px; font-weight: 800; text-transform: uppercase;
+  letter-spacing: 1px; color: var(--text-3);
+  padding: 0 4px 8px; display: flex; align-items: center; gap: 6px;
+}
+.g-group-head span.count {
+  font-size: 10px; font-weight: 700; color: var(--text-3);
+  background: var(--surface-2); border: 1px solid var(--border);
+  padding: 1px 7px; border-radius: 999px; letter-spacing: 0.3px;
+}
+
+/* ============ ACCORDION SECTION ============ */
+.g-acc {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 14px; margin-bottom: 10px;
+  overflow: hidden; transition: border-color 0.2s, box-shadow 0.2s;
+}
+.g-acc.open {
+  border-color: var(--accent-border);
+  box-shadow: 0 4px 14px rgba(255,87,34,0.08);
+}
+.g-acc-head {
+  width: 100%; padding: 14px 16px; border: none; background: transparent;
+  cursor: pointer; font-family: inherit; text-align: left;
+  display: flex; align-items: center; gap: 12px;
+  transition: background 0.15s;
+}
+.g-acc-head:active { background: var(--surface-2); }
+.g-acc-num {
+  width: 28px; height: 28px; flex-shrink: 0; display: inline-flex;
+  align-items: center; justify-content: center;
+  background: var(--accent); color: #fff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-weight: 800; font-size: 12px;
+  border-radius: 8px;
+}
+.g-acc-title {
+  flex: 1; min-width: 0; font-size: 14px; font-weight: 700;
+  color: var(--text-1); letter-spacing: -0.01em;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.g-acc-arrow {
+  font-size: 20px; line-height: 1; color: var(--text-3);
+  transition: transform 0.25s ease-out, color 0.2s;
+  flex-shrink: 0;
+}
+.g-acc.open .g-acc-arrow { transform: rotate(90deg); color: var(--accent); }
+.g-acc-body {
+  max-height: 0; overflow: hidden;
+  transition: max-height 0.3s ease-out;
+}
+.g-acc.open .g-acc-body { max-height: 5000px; }
+.g-acc-content {
+  padding: 0 16px 18px;
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+
+/* ============ BADGES ============ */
+.g-badge-new,
+.g-badge-hot {
+  display: inline-block; font-size: 9.5px; font-weight: 800;
+  padding: 2px 8px; border-radius: 4px; border: 1px solid;
+  letter-spacing: 0.5px; text-transform: uppercase;
+  line-height: 1.4;
+}
+.g-badge-new { color: var(--new); background: var(--new-bg); border-color: var(--new-bd); }
+.g-badge-hot { color: var(--hot); background: var(--hot-bg); border-color: var(--hot-bd); }
+
+/* ============ CONTENT IN SECTION ============ */
+.g-h3 {
+  font-size: 13px; font-weight: 700; margin: 16px 0 8px;
+  letter-spacing: -0.01em; color: var(--text-1);
+  display: flex; align-items: center; gap: 6px;
+}
+.g-h3:first-child { margin-top: 0; }
+.g-p { font-size: 13px; color: var(--text-2); line-height: 1.65; margin-bottom: 10px; }
+.g-p:last-child { margin-bottom: 0; }
+.g-p b { color: var(--text-1); font-weight: 700; }
+.g-p code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11.5px;
+  background: var(--surface-2); border: 1px solid var(--border);
+  padding: 1px 6px; border-radius: 4px; color: var(--accent); font-weight: 600;
+  word-break: break-all;
+}
+.g-list { list-style: none; padding: 0; margin: 0 0 10px; display: flex; flex-direction: column; gap: 6px; }
+.g-list li { position: relative; padding-left: 24px; font-size: 13px; color: var(--text-2); line-height: 1.55; }
+.g-list li::before {
+  content: ''; position: absolute; left: 8px; top: 8px;
+  width: 6px; height: 6px; border-radius: 50%; background: var(--accent);
+}
+.g-list li b { color: var(--text-1); font-weight: 700; }
+.g-olist { padding-left: 22px; margin: 0 0 10px; font-size: 13px; color: var(--text-2); line-height: 1.7; }
+.g-olist li { margin-bottom: 6px; padding-left: 4px; }
+.g-olist li b { color: var(--text-1); font-weight: 700; }
+
+.g-card {
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: 12px; padding: 12px 14px; margin: 10px 0;
+}
+.g-card-title { font-size: 12.5px; font-weight: 700; margin-bottom: 6px; color: var(--text-1); }
+.g-card p { font-size: 12px; color: var(--text-2); line-height: 1.55; margin: 0; }
+.g-card p + p { margin-top: 6px; }
+.g-card b { color: var(--text-1); font-weight: 700; }
+
+.g-table {
+  width: 100%; border-collapse: collapse; font-size: 12.5px; margin: 10px 0;
+  background: var(--surface); border-radius: 10px; overflow: hidden;
+  border: 1px solid var(--border);
+}
+.g-table th {
+  background: var(--surface-2); text-align: left; padding: 10px 12px;
+  font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.6px; color: var(--text-3); border-bottom: 1px solid var(--border);
+}
+.g-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); color: var(--text-2); vertical-align: top; }
+.g-table tr:last-child td { border-bottom: none; }
+.g-table b { color: var(--text-1); font-weight: 700; }
+
+.g-code {
+  background: #0d1117; color: #c9d1d9; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11.5px; line-height: 1.55; padding: 12px 14px; border-radius: 10px;
+  overflow-x: auto; margin: 10px 0; border: 1px solid #30363d; white-space: pre;
+}
+.g-code b { color: #ff6e40; font-weight: 700; }
+
+/* ============ CALLOUT ============ */
+.g-callout {
+  padding: 12px 14px; border-radius: 12px; margin: 12px 0;
+  border-left: 4px solid; font-size: 12.5px; line-height: 1.6;
+  background: var(--surface-2);
+}
+.g-callout-title {
+  font-weight: 800; font-size: 12px; display: block;
+  margin-bottom: 6px; letter-spacing: -0.005em;
+  display: flex; align-items: center; gap: 6px;
+}
+.g-callout b { color: var(--text-1); font-weight: 700; }
+.g-callout p { margin: 0; color: var(--text-2); }
+.g-callout p + p { margin-top: 6px; }
+
+.g-callout-info { border-color: var(--info); background: var(--info-bg); }
+.g-callout-info .g-callout-title { color: var(--info); }
+.g-callout-warn { border-color: var(--warning); background: var(--warning-bg); }
+.g-callout-warn .g-callout-title { color: var(--warning); }
+.g-callout-danger { border-color: var(--danger); background: var(--danger-bg); }
+.g-callout-danger .g-callout-title { color: var(--danger); }
+.g-callout-success { border-color: var(--success); background: var(--success-bg); }
+.g-callout-success .g-callout-title { color: var(--success); }
+
+/* ============ SECTION "NOT FOUND" ============ */
+.g-empty {
+  text-align: center; padding: 40px 20px;
+  color: var(--text-3); font-size: 13px; display: none;
+}
+.g-empty.show { display: block; }
+
+/* ============ FOOTER ============ */
+.g-footer {
+  margin-top: 32px; padding: 20px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 16px; text-align: center;
+}
+.g-footer-text { font-size: 12px; color: var(--text-3); line-height: 1.6; margin-bottom: 14px; }
+.g-footer-text b { color: var(--text-1); font-weight: 700; }
+.g-footer-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 13px 22px; background: var(--accent); color: #fff; border: none;
+  border-radius: 12px; font-family: inherit; font-size: 13.5px; font-weight: 700;
+  cursor: pointer; text-decoration: none; width: 100%; max-width: 320px;
+  box-shadow: 0 4px 14px rgba(255,87,34,0.3);
+}
+.g-footer-btn:active { transform: scale(0.97); }
+.g-footer-btn svg { width: 18px; height: 18px; }
+
+/* ============ LIGHTBOX ============ */
+#gLightbox {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.95);
+  display: none; align-items: center; justify-content: center;
+  z-index: 999; padding: 16px;
+}
+#gLightbox.active { display: flex; }
+#gLightbox img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 8px; }
+#gLightbox .g-lb-close {
+  position: absolute; top: calc(12px + env(safe-area-inset-top, 0px)); right: 12px;
+  width: 44px; height: 44px; border-radius: 50%; background: rgba(255,255,255,0.15);
+  color: #fff; border: none; font-size: 22px; font-weight: 700; cursor: pointer;
+}
+
+/* ============ RESPONSIVE ============ */
+@media (max-width: 360px) {
+  .g-quick { padding: 16px; }
+  .g-quick-title { font-size: 15px; }
+  .g-acc-head { padding: 12px 14px; gap: 10px; }
+  .g-acc-num { width: 26px; height: 26px; font-size: 11px; }
+  .g-acc-title { font-size: 13.5px; }
+  .g-acc-content { padding: 12px 14px 16px; }
+  .g-table th, .g-table td { padding: 8px 10px; font-size: 11.5px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .g-acc-body, .g-acc-arrow, .g-search-wrap { transition: none !important; }
+}
+</style>
 </head>
 <body>
-  <header><div class="top"><div class="brand">📦 SPX Tracker · Hướng dẫn</div><a class="back" href="./index.html">← Về ứng dụng</a></div></header>
-  <main>
-    <h1>Hướng dẫn sử dụng</h1>
-    <p class="intro">Hướng dẫn nhanh để ghi nhận sản lượng Giao, Lấy, Hoàn; quét ảnh bằng OCR và bảo vệ dữ liệu.</p>
-    <section>
-      <h2>1. Tổng quan</h2>
-      <p>Màn hình chính hiển thị số liệu theo tháng đang chọn. Dùng mũi tên để chuyển tháng hoặc chạm vào nhãn tháng để chọn tháng khác. Thanh điều hướng phía dưới dùng để mở Tổng quan, Giao, Quét ảnh, Lấy và Hoàn.</p>
-      <div class="grid"><div class="tile"><strong>Giao</strong>Nhập số đơn giao theo từng dải khối lượng.</div><div class="tile"><strong>Lấy</strong>Ghi nhận sản lượng lấy hàng.</div><div class="tile"><strong>Hoàn</strong>Ghi nhận sản lượng hoàn hàng.</div><div class="tile"><strong>Nhật ký</strong>Xem, lọc, sửa hoặc xóa bản ghi đã lưu.</div></div>
-    </section>
-    <section>
-      <h2>2. Nhập số liệu thủ công</h2>
-      <ol><li>Chọn <strong>Nhập tay</strong> hoặc nút thêm dữ liệu.</li><li>Kiểm tra ngày ghi nhận.</li><li>Điền số đơn ở các dải khối lượng tương ứng; ô không phát sinh có thể để 0.</li><li>Nhấn <strong>Lưu dữ liệu</strong> và kiểm tra bản ghi trong Nhật ký.</li></ol>
-      <p class="note">Ứng dụng có thể cảnh báo khi phát hiện bản ghi trùng cùng loại, cùng ngày và cùng số liệu. Kiểm tra kỹ trước khi xác nhận.</p>
-    </section>
-    <section>
-      <h2>3. Quét ảnh OCR</h2>
-      <ol><li>Mở chức năng quét ảnh bằng nút quét ở thanh dưới.</li><li>Chọn ảnh chụp bảng sản lượng rõ nét, đủ sáng và không bị cắt mất tiêu đề/cột số.</li><li>Chờ OCR nhận dạng, sau đó kiểm tra lại ngày, loại Giao/Lấy/Hoàn và từng dải khối lượng.</li><li>Chỉnh số sai rồi mới lưu. Không nên lưu hàng loạt nếu chưa rà soát kết quả.</li></ol>
-      <p class="note">OCR chỉ hỗ trợ đọc ảnh, không đảm bảo chính xác tuyệt đối. Số liệu nhỏ, ảnh nghiêng hoặc chữ mờ có thể bị đọc sai.</p>
-    </section>
-    <section>
-      <h2>4. Nhật ký và nhập bù</h2>
-      <p>Vào Nhật ký để lọc theo Tất cả, Giao, Lấy, Hoàn hoặc theo ngày. Nút <strong>Sửa</strong> dùng để điều chỉnh bản ghi; nút <strong>Xóa</strong> xóa bản ghi đã chọn.</p>
-      <p>Nếu ứng dụng báo ngày chưa cập nhật, hãy mở danh sách ngày được nhắc và nhập/quét bù đúng ngày. Cảnh báo là gợi ý kiểm tra, không tự xác nhận rằng ngày đó chắc chắn thiếu dữ liệu.</p>
-    </section>
-    <section>
-      <h2>5. Sao lưu và khôi phục</h2>
-      <ol><li>Mở Menu → Cài đặt/Sao lưu.</li><li>Dùng chức năng xuất/lưu file để tạo bản sao lưu trên thiết bị.</li><li>Giữ file ở nơi an toàn trước khi xóa lịch sử, đổi máy hoặc xóa dữ liệu trình duyệt.</li><li>Khi khôi phục, chọn đúng file backup do ứng dụng tạo và kiểm tra số liệu sau khi nhập.</li></ol>
-      <p class="note">Dữ liệu lưu trên trình duyệt có thể bị mất nếu xóa dữ liệu trang web hoặc gỡ ứng dụng. Hãy sao lưu định kỳ; không chia sẻ file backup nếu trong đó có thông tin riêng tư.</p>
-    </section>
-    <section>
-      <h2>6. Khi ứng dụng không phản hồi</h2>
-      <ol><li>Tải lại trang một lần.</li><li>Nếu vừa cập nhật, đóng các tab SPX Tracker khác rồi mở lại trang.</li><li>Nếu vẫn không hoạt động, mở trang trong trình duyệt thay vì biểu tượng PWA để kiểm tra.</li><li>Không xóa dữ liệu trang web trước khi xuất backup vì thao tác đó có thể làm mất dữ liệu cục bộ.</li></ol>
-    </section>
-    <section>
-      <h2>7. Mẹo sử dụng an toàn</h2>
-      <ul><li>Kiểm tra tháng và ngày trước khi lưu.</li><li>Đối chiếu tổng số đơn với nguồn gốc trước khi xác nhận kết quả OCR.</li><li>Không bấm xóa toàn bộ nếu chưa chắc đã có bản backup.</li><li>Sau khi triển khai phiên bản mới trên GitHub Pages, chờ hoàn tất rồi tải lại ứng dụng.</li></ul>
-      <p><a href="./index.html">Quay lại SPX Tracker</a></p>
-    </section>
-  </main>
+
+<header class="g-header">
+  <div class="g-header-inner">
+    <a href="./index.html" class="g-back-btn" aria-label="Quay lại">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="19" y1="12" x2="5" y2="12"/>
+        <polyline points="12 19 5 12 12 5"/>
+      </svg>
+    </a>
+    <div class="g-title">Hướng dẫn sử dụng</div>
+    <button class="g-search-toggle" id="gSearchToggle" onclick="toggleSearch()" aria-label="Tìm kiếm">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="11" cy="11" r="7"/>
+        <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<div class="g-search-wrap" id="gSearchWrap">
+  <div class="g-search-inner">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="11" cy="11" r="7"/>
+      <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+    </svg>
+    <input type="text" class="g-search-input" id="gSearchInput" placeholder="Tìm: quét ảnh, sao lưu, lương..." oninput="filterSections(this.value)">
+    <button class="g-search-clear" id="gSearchClear" onclick="clearSearch()" aria-label="Xóa">✕</button>
+  </div>
+</div>
+
+<div class="g-shell">
+    
+<!-- ============ QUICK START ============ -->
+<section class="g-quick" id="quickStart">
+  <div class="g-quick-title">🚀 Bắt đầu nhanh</div>
+  <div class="g-quick-sub">Mới dùng app? Đọc 3 bước này trước nhé.</div>
+  <div class="g-quick-steps">
+    <div class="g-quick-step">
+      <span class="g-quick-num">1</span>
+      <span><b>Cài app</b> vào màn hình chính (xem mục ①)</span>
+    </div>
+    <div class="g-quick-step">
+      <span class="g-quick-num">2</span>
+      <span><b>Chụp màn hình SPX</b> → quét ảnh (xem mục ②)</span>
+    </div>
+    <div class="g-quick-step">
+      <span class="g-quick-num">3</span>
+      <span><b>Cấu hình lương</b> ở tab T.Quan (xem mục ⑤)</span>
+    </div>
+  </div>
+  <a href="#sec-2" class="g-quick-cta" onclick="openSection('sec-2')">
+    📖 Bắt đầu từ mục ② Quét ảnh
+  </a>
+</section>
+
+<!-- ============ NHÓM 1: CÀI ĐẶT & QUÉT ẢNH ============ -->
+<div class="g-group">
+  <div class="g-group-head">
+    📱 Cài đặt &amp; Quét ảnh
+    <span class="count">4 mục</span>
+  </div>
+
+  <!-- === ① CÀI ĐẶT APP === -->
+  <div class="g-acc" id="sec-1" data-keywords="cài đặt app pwa cài màn hình chính android iphone ios chrome safari share gallery">
+    <button class="g-acc-head" onclick="toggleSection('sec-1')">
+      <span class="g-acc-num">1</span>
+      <span class="g-acc-title">Cài đặt app</span>
+      <span class="g-acc-arrow">›</span>
+    </button>
+    <div class="g-acc-body">
+      <div class="g-acc-content">
+
+        <h3 class="g-h3">🌐 Đường dẫn (URL)</h3>
+        <p class="g-p"><code>https://linhshope124-a11y.github.io/spx/</code></p>
+
+        <h3 class="g-h3">📱 Cài như app</h3>
+        <div class="g-card">
+          <div class="g-card-title">🤖 Android (Chrome)</div>
+          <p>Mở URL → <b>⋮</b> → <b>Thêm vào màn hình chính</b></p>
+        </div>
+        <div class="g-card">
+          <div class="g-card-title">🍎 iPhone (Safari)</div>
+          <p>Mở URL → <b>Chia sẻ</b> → <b>Thêm vào màn hình chính</b></p>
+        </div>
+
+        <div class="g-callout g-callout-info">
+          <span class="g-callout-title">💡 BẮT BUỘC CÀI APP</span>
+          <p>Muốn dùng tính năng <b>Chia sẻ ảnh từ Thư viện</b> → phải cài app vào màn hình chính trước. Không cài = nút Share không có SPX Tracker.</p>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- === ② QUÉT ẢNH === -->
+  <div class="g-acc" id="sec-2" data-keywords="quét ảnh ocr chụp màn hình spx share gallery tab giao lấy hoàn tự nhận diện viền ô conf">
+    <button class="g-acc-head" onclick="toggleSection('sec-2')">
+      <span class="g-acc-num">2</span>
+      <span class="g-acc-title">Quét ảnh <span class="g-badge-hot">HOT</span></span>
+      <span class="g-acc-arrow">›</span>
+    </button>
+    <div class="g-acc-body">
+      <div class="g-acc-content">
+
+        <h3 class="g-h3">📸 Bước 1 — Chụp màn hình SPX</h3>
+        <p class="g-p">Mở app SPX → vào <b>"Chi tiết đơn theo ngày"</b> → chụp màn hình (nguồn + volume-).</p>
+
+        <h3 class="g-h3">⚡ Bước 2 — Quét (2 cách)</h3>
+        <div class="g-card">
+          <div class="g-card-title">📷 Cách A — Quét trong app</div>
+          <p>Mở SPX Tracker → bấm <b>📷</b> giữa bottom nav → chọn ảnh (1 hoặc nhiều)</p>
+        </div>
+        <div class="g-card">
+          <div class="g-card-title">📤 Cách B — Chia sẻ từ Thư viện (nhanh hơn)</div>
+          <p>Thư viện ảnh → chọn ảnh → <b>Chia sẻ</b> → chọn <b>SPX Tracker</b></p>
+          <p style="margin-top:6px">✅ <b>Android</b> — chia sẻ nhiều ảnh cùng lúc</p>
+          <p>⚠️ <b>iOS</b> — chỉ 1 ảnh/lần</p>
+        </div>
+
+        <h3 class="g-h3">✅ Bước 3 — Kết quả</h3>
+        <ul class="g-list">
+          <li>App <b>tự nhận diện tab</b> (Giao / Lấy / Hoàn) — không cần chọn tay</li>
+          <li>Điểm cao + tổng khớp + phân bố OK → <b>tự lưu</b> (nếu toggle BẬT, xem mục ③)</li>
+          <li>Không đủ điều kiện → hiện bảng đối chiếu ảnh gốc</li>
+        </ul>
+
+        <h3 class="g-h3">🎨 Màu viền ô khi cần check</h3>
+        <table class="g-table">
+          <thead><tr><th>Màu</th><th>Ý nghĩa</th></tr></thead>
+          <tbody>
+            <tr><td>🟢 <b>Xanh</b></td><td>Độ tin cậy cao (≥85%)</td></tr>
+            <tr><td>🟡 <b>Vàng</b></td><td>Xem lại (70-84%)</td></tr>
+            <tr><td>🔴 <b>Đỏ</b></td><td>Sửa tay (&lt;70%)</td></tr>
+            <tr><td>🟠 <b>Cam</b></td><td>Phân bố lạ — phải đối chiếu ảnh gốc</td></tr>
+          </tbody>
+        </table>
+
+        <div class="g-callout g-callout-info">
+          <span class="g-callout-title">📚 Quét nhiều ảnh cùng lúc</span>
+          <p>Chọn nhiều ảnh → app xử lý lần lượt → ảnh nào chuẩn tự lưu → ảnh cần kiểm tra sẽ gom vào <b>danh sách chờ</b> để xử lý riêng.</p>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- === ③ TỰ LƯU OCR === -->
+  <div class="g-acc" id="sec-3" data-keywords="tự lưu ocr toggle bật tắt tự động lưu điểm cao confidence">
+    <button class="g-acc-head" onclick="toggleSection('sec-3')">
+      <span class="g-acc-num">3</span>
+      <span class="g-acc-title">Tự lưu ảnh quét <span class="g-badge-new">MỚI</span></span>
+      <span class="g-acc-arrow">›</span>
+    </button>
+    <div class="g-acc-body">
+      <div class="g-acc-content">
+
+        <h3 class="g-h3">📍 Vị trí</h3>
+        <p class="g-p">Menu ☰ → dòng <b>"Tự lưu ảnh quét: BẬT/TẮT"</b> (nằm giữa "Chế độ tối" và "Sao lưu & Đồng bộ Cloud")</p>
+
+        <h3 class="g-h3">✅ Khi BẬT — tự lưu khi TẤT CẢ điều kiện sau đúng</h3>
+        <ul class="g-list">
+          <li>Kết quả quét <b>sạch</b> — không phải tự đoán số (không có <code>+fix</code>)</li>
+          <li>Độ tin cậy <b>≥85%</b> — không có dải vàng/đỏ</li>
+          <li>Tổng quét <b>khớp</b> 100% với "Tổng N đơn hàng"</li>
+          <li>Phân bố hợp lý — dải 0-2 chiếm ≥50%</li>
+          <li>Nhận diện được <b>tab</b> (Giao/Lấy/Hoàn)</li>
+          <li>Đọc được <b>ngày</b> trên ảnh</li>
+        </ul>
+
+        <h3 class="g-h3">⏸️ Khi TẮT</h3>
+        <p class="g-p">Mọi case đều <b>mở bảng kiểm tra</b> — bạn tự xem và lưu tay.</p>
+
+        <h3 class="g-h3">⚠️ VẪN MỞ BẢNG dù toggle BẬT</h3>
+        <ul class="g-list">
+          <li>App phải <b>đoán số</b> để khớp tổng (mode <code>+fix</code>)</li>
+          <li>Có dải vàng (conf 70-84%)</li>
+          <li>Tổng lệch — không khớp "Tổng N đơn hàng"</li>
+          <li>Phân bố bất thường — dải 0-2 &lt;50%</li>
+          <li>Không detect được tab hoặc không thấy ngày</li>
+        </ul>
+
+        <div class="g-callout g-callout-danger">
+          <span class="g-callout-title">🚨 BANNER CẢNH BÁO KHI APP ĐOÁN SỐ</span>
+          <p>Khi app tự đổi 1 chữ số để khớp tổng, sẽ hiện banner <b>nhấp nháy</b> trên bảng:</p>
+          <p>🟠 <b>Cam</b> = đoán an toàn (thay đổi ≤3× giá trị gốc)</p>
+          <p>🔴 <b>Đỏ</b> = đoán mạo hiểm (&gt;3× — khả năng sai cao)</p>
+          <p style="margin-top:8px"><b>BẮT BUỘC</b> đối chiếu ảnh gốc bên dưới trước khi bấm Lưu.</p>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- === ④ XỬ LÝ ẢNH SAI === -->
+  <div class="g-acc" id="sec-4" data-keywords="ocr sai xử lý sửa tay copy log debug đối chiếu ảnh gốc fix">
+    <button class="g-acc-head" onclick="toggleSection('sec-4')">
+      <span class="g-acc-num">4</span>
+      <span class="g-acc-title">Xử lý ảnh quét sai số</span>
+      <span class="g-acc-arrow">›</span>
+    </button>
+    <div class="g-acc-body">
+      <div class="g-acc-content">
+
+        <h3 class="g-h3">🎨 Khi bảng kiểm tra hiện ra</h3>
+        <ul class="g-list">
+          <li>Số <b>ĐÚNG</b> → giữ nguyên, bấm <b>Lưu dữ liệu</b></li>
+          <li>Số <b>SAI</b> → sửa tay trong ô nhập rồi Lưu</li>
+        </ul>
+
+        <h3 class="g-h3">🔧 Khi nào app đoán số?</h3>
+        <p class="g-p">Khi quét đọc sai 1-2 chữ số khiến tổng lệch, app tự đổi cho khớp "Tổng N đơn hàng". Lúc này có <b>banner cam/đỏ</b> cảnh báo.</p>
+
+        <h3 class="g-h3">✅ Quy trình đúng</h3>
+        <ol class="g-olist">
+          <li>Nhìn banner cảnh báo — biết app đã đoán số nào</li>
+          <li>So với <b>ảnh gốc</b> bên dưới</li>
+          <li>Nếu đúng → Lưu luôn</li>
+          <li>Nếu sai → sửa tay ô nhập → Lưu</li>
+        </ol>
+
+        <div class="g-callout g-callout-info">
+          <span class="g-callout-title">📋 Copy log để báo lỗi</span>
+          <p>Trong bảng kiểm tra có nút <b>"📋 Copy log"</b> — bấm để sao chép nhật ký quét. Dùng khi cần báo lỗi cho dev.</p>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+</div><!-- /group 1 -->
+
+  <!-- ============ NHÓM 2: TÍNH LƯƠNG & ĐIỂM ============ -->
+  <div class="g-group">
+    <div class="g-group-head">
+      💰 Tính lương &amp; Điểm
+      <span class="count">2 mục</span>
+    </div>
+
+    <!-- === ⑤ LƯƠNG + RULE TÀI XẾ === -->
+    <div class="g-acc" id="sec-5" data-keywords="lương lcb kc bưu cục khoảng cách tài xế rule 1500 công thu nhập miền hcm hà nội">
+      <button class="g-acc-head" onclick="toggleSection('sec-5')">
+        <span class="g-acc-num">5</span>
+        <span class="g-acc-title">Lương + Rule Tài xế <span class="g-badge-hot">HOT</span></span>
+        <span class="g-acc-arrow">›</span>
+      </button>
+      <div class="g-acc-body">
+        <div class="g-acc-content">
+
+          <h3 class="g-h3">📍 Vị trí</h3>
+          <p class="g-p">Tab <b>T.Quan</b> → mở mục <b>Thu nhập</b> → nhập 3 ô.</p>
+
+          <h3 class="g-h3">💵 3 ô nhập</h3>
+          <table class="g-table">
+            <thead><tr><th>Ô</th><th>Ý nghĩa</th></tr></thead>
+            <tbody>
+              <tr><td><b>LCB</b></td><td>Lương cơ bản</td></tr>
+              <tr><td><b>KC Bưu cục</b></td><td>Khoảng cách bưu cục</td></tr>
+              <tr><td><b>KC Tài xế</b></td><td>Khoảng cách tài xế (xem rule dưới)</td></tr>
+            </tbody>
+          </table>
+          <p class="g-p">Bấm <b>"Lưu cấu hình tháng này"</b> để lưu.</p>
+
+          <div class="g-callout g-callout-warn">
+            <span class="g-callout-title">⚡ RULE QUAN TRỌNG — KC Tài xế</span>
+            <p><b>KC Tài xế chỉ được cộng vào lương khi Đơn Giao ≥ 1.500/tháng.</b></p>
+            <p>• <b>&lt; 1.500</b> → không cộng (bỏ qua ô KC Tài xế)</p>
+            <p>• <b>≥ 1.500</b> → cộng đầy đủ</p>
+            <p style="margin-top:6px">→ App hiện <b>banner cảnh báo</b> ngay dưới ô nhập, báo còn thiếu bao nhiêu đơn.</p>
+          </div>
+
+          <h3 class="g-h3">📐 Công thức</h3>
+          <pre class="g-code">Lương 1 công = (LCB + KC Bưu cục + KC Tài xế) / ngày tối đa
+
+Ngày tối đa:
+  • Tháng 2  → 24 ngày
+  • Tháng khác → 26 ngày
+
+Số công = đếm ngày có:
+  Giao + (Lấy / 6) + Hoàn ≥ ngưỡng
+  • Miền:   ≥60 = 1 công, ≥30 = 0.5 công
+  • HCM/HN: ≥80 = 1 công, ≥40 = 0.5 công
+
+Tích lũy = Lương 1 công × số công
+
+⚠️ Các ô nhập tính bằng ĐIỂM — không phải VNĐ.
+App chỉ quy đổi điểm → lương, không quan tâm đơn vị tiền.</pre>
+
+          <div class="g-callout g-callout-info">
+            <span class="g-callout-title">📅 Lưu theo tháng</span>
+            <p>Lương + Hạng lưu <b>riêng theo từng tháng</b>. Đổi tháng → tự chuyển cấu hình tháng đó.</p>
+            <p>Riêng <b>Khu vực</b> (Miền / HCM-HN) chọn 1 lần, áp dụng mọi tháng.</p>
+          </div>
+
+          <div class="g-callout g-callout-info">
+            <span class="g-callout-title">💡 "KC" nghĩa là gì?</span>
+            <p><b>KC</b> = <b>Khoảng cách</b> — khoản phụ cấp tính theo khoảng cách từ bưu cục / tài xế đến điểm giao hàng, được SPX cộng vào lương hàng tháng.</p>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- === ⑥ HẠNG THƯỞNG === -->
+    <div class="g-acc" id="sec-6" data-keywords="hạng thưởng đồng bạc vàng bạch kim kim cương bonus phần trăm">
+      <button class="g-acc-head" onclick="toggleSection('sec-6')">
+        <span class="g-acc-num">6</span>
+        <span class="g-acc-title">Hạng thưởng</span>
+        <span class="g-acc-arrow">›</span>
+      </button>
+      <div class="g-acc-body">
+        <div class="g-acc-content">
+
+          <table class="g-table">
+            <thead><tr><th>Hạng</th><th>Bonus</th></tr></thead>
+            <tbody>
+              <tr><td>Chuẩn (không chọn)</td><td><b>+0%</b></td></tr>
+              <tr><td><b>Đồng</b></td><td>+10%</td></tr>
+              <tr><td><b>Bạc</b></td><td>+15%</td></tr>
+              <tr><td><b>Vàng</b></td><td>+20%</td></tr>
+              <tr><td><b>Bạch Kim</b></td><td>+22%</td></tr>
+              <tr><td><b>Kim Cương</b></td><td>+26%</td></tr>
+            </tbody>
+          </table>
+
+          <h3 class="g-h3">🎯 Cách chọn</h3>
+          <ul class="g-list">
+            <li><b>Chạm</b> pill → chọn hạng cho tháng đang xem</li>
+            <li><b>Giữ 0.5s</b> pill đang active → bỏ chọn (về Chuẩn)</li>
+            <li>Chuyển tháng → hạng tự đổi theo tháng đó</li>
+          </ul>
+
+          <pre class="g-code">Thưởng = Gốc × %hạng
+
+VD: Gốc 1.100, hạng Vàng (+20%)
+    → Thưởng = 220</pre>
+
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /group 2 -->
+
+  <!-- ============ NHÓM 3: DỮ LIỆU & BACKUP ============ -->
+  <div class="g-group">
+    <div class="g-group-head">
+      💾 Dữ liệu &amp; Backup
+      <span class="count">4 mục</span>
+    </div>
+
+    <!-- === ⑦ BACKUP CLOUD === -->
+    <div class="g-acc" id="sec-7" data-keywords="backup cloud gist github token khôi phục đồng bộ sao lưu json export import file">
+      <button class="g-acc-head" onclick="toggleSection('sec-7')">
+        <span class="g-acc-num">7</span>
+        <span class="g-acc-title">Sao lưu Cloud (Gist) <span class="g-badge-hot">HOT</span></span>
+        <span class="g-acc-arrow">›</span>
+      </button>
+      <div class="g-acc-body">
+        <div class="g-acc-content">
+
+          <div class="g-callout g-callout-info">
+            <span class="g-callout-title">💾 TẠI SAO CẦN</span>
+            <p>Xóa cache trình duyệt / reset máy → mất data. Cloud backup giúp khôi phục lại.</p>
+          </div>
+
+          <h3 class="g-h3">🔑 Setup 1 lần (5 phút)</h3>
+          <ol class="g-olist">
+            <li>Vào <code>github.com/settings/tokens</code> (đăng nhập GitHub)</li>
+            <li>Bấm <b>Generate new token (classic)</b></li>
+            <li>Note: <code>spx-backup</code> · Expiration: <b>90 days (recommended)</b></li>
+            <li>Chỉ cấp quyền <code>gist</code>; đặt hạn dùng khoảng 90 ngày (không chọn token vô thời hạn).</li>
+            <li>Bật xác thực 2 bước cho GitHub và thu hồi token ngay nếu nghi bị lộ.</li>
+            <li>Copy token <code>ghp_...</code></li>
+            <li>Mở app → Menu ☰ → <b>Sao lưu & Cloud</b> → dán token</li>
+            <li>Bấm <b>🔌 Kiểm tra</b> → <b>☁️ Backup</b> (tạo Gist lần đầu)</li>
+            <li>Tích <b>"Tự động backup"</b> → từ đó tự sync mỗi thay đổi</li>
+          </ol>
+
+          <h3 class="g-h3">🔄 Khôi phục khi mất data</h3>
+          <ol class="g-olist">
+            <li>Menu ☰ → <b>Sao lưu & Cloud</b></li>
+            <li>Bấm <b>⬇️ Khôi phục từ Cloud</b></li>
+            <li>Chọn <b>GHI ĐÈ</b> (xóa hết cũ) hoặc <b>THÊM VÀO</b> (giữ cũ + thêm mới)</li>
+          </ol>
+
+          <h3 class="g-h3">📁 Backup file JSON (offline)</h3>
+          <ul class="g-list">
+            <li><b>💾 Lưu file</b> — tải file về máy</li>
+            <li><b>📥 Nạp file</b> — chọn file JSON đã lưu</li>
+            <li><b>🔄 Phục hồi tự động</b> — khôi phục từ vault (bản sao lưu ngầm)</li>
+          </ul>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- === ⑧ AUTO BACKUP 7 NGÀY === -->
+    <div class="g-acc" id="sec-8" data-keywords="auto backup 7 ngày tự động nhắc định kỳ lưu file downloads">
+      <button class="g-acc-head" onclick="toggleSection('sec-8')">
+        <span class="g-acc-num">8</span>
+        <span class="g-acc-title">Auto backup 7 ngày <span class="g-badge-new">MỚI</span></span>
+        <span class="g-acc-arrow">›</span>
+      </button>
+      <div class="g-acc-body">
+        <div class="g-acc-content">
+
+          <h3 class="g-h3">⏰ Cách hoạt động</h3>
+          <ul class="g-list">
+            <li>Sau <b>7 ngày</b> kể từ lần backup gần nhất</li>
+            <li>Mở app → đợi 5 giây → hiện hộp thoại hỏi</li>
+            <li>Bấm <b>"📥 Lưu file ngay"</b> → tải file về Downloads</li>
+            <li>Bấm <b>"Để sau"</b> → mai mở app sẽ hỏi lại</li>
+          </ul>
+
+          <h3 class="g-h3">📱 Hộp thoại trông như thế này</h3>
+          <div class="g-card">
+            <div class="g-card-title">📥 Backup định kỳ</div>
+            <p>Đã 7 ngày chưa backup.</p>
+            <p>Bạn đang có N bản ghi.</p>
+            <p>Tải file backup về máy để phòng khi mất dữ liệu?</p>
+            <p style="margin-top:8px"><b>[📥 Lưu file ngay]</b> · <b>[Để sau]</b></p>
+          </div>
+
+          <div class="g-callout g-callout-info">
+            <span class="g-callout-title">💡 Điều kiện hiện hộp thoại</span>
+            <p>• Có ≥1 bản ghi trong app</p>
+            <p>• Quá 7 ngày từ lần backup trước</p>
+            <p>• Hôm nay chưa bấm "Để sau"</p>
+            <p>• Không đang mở bảng/OCR (app sẽ lùi lại 60s, tối đa 5 lần)</p>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- === ⑨ XÓA NHẬT KÝ === -->
+    <div class="g-acc" id="sec-9" data-keywords="xóa nhật ký toàn bộ lưu backup trước khi xóa hoàn tác">
+      <button class="g-acc-head" onclick="toggleSection('sec-9')">
+        <span class="g-acc-num">9</span>
+        <span class="g-acc-title">Xóa Nhật ký <span class="g-badge-new">MỚI</span></span>
+        <span class="g-acc-arrow">›</span>
+      </button>
+      <div class="g-acc-body">
+        <div class="g-acc-content">
+
+          <h3 class="g-h3">📍 Vị trí</h3>
+          <p class="g-p">Menu ☰ → <b>Sao lưu & Cloud</b> → kéo xuống <b>"Xóa toàn bộ nhật ký"</b></p>
+
+          <h3 class="g-h3">🎯 Quy trình 3 lựa chọn</h3>
+          <p class="g-p">Bấm "Xóa toàn bộ nhật ký" → hiện hộp thoại 3 nút:</p>
+          <div class="g-card">
+            <div class="g-card-title">⚠️ Xóa toàn bộ nhật ký</div>
+            <p>Bạn sắp xóa TOÀN BỘ N bản ghi.</p>
+            <p>Hành động này KHÔNG THỂ KHÔI PHỤC.</p>
+            <p>Bạn muốn lưu file backup về máy trước khi xóa không?</p>
+            <p style="margin-top:10px"><b>← Hủy</b> (không xóa gì)</p>
+            <p><b>📥 Có, lưu backup</b> → tải file rồi hỏi lại</p>
+            <p><b>🗑️ Không, xóa luôn</b> → xóa trực tiếp</p>
+          </div>
+
+          <h3 class="g-h3">Nếu chọn "Có, lưu backup"</h3>
+          <p class="g-p">App tải file về Downloads → hiện hộp thoại 2 xác nhận:</p>
+          <div class="g-card">
+            <div class="g-card-title">🚨 Xác nhận xóa</div>
+            <p>📁 File backup đã lưu về thư mục Downloads chưa?</p>
+            <p>Nếu đã thấy file → bấm ĐÃ LƯU, XÓA LUÔN.</p>
+            <p>Nếu chưa thấy → bấm HỦY XÓA để kiểm tra lại.</p>
+            <p style="margin-top:10px"><b>← Chưa lưu, hủy xóa</b></p>
+            <p><b>🗑️ Đã lưu xong, xóa luôn</b></p>
+          </div>
+
+          <div class="g-callout g-callout-danger">
+            <span class="g-callout-title">⚠️ KHÔNG CÓ HOÀN TÁC</span>
+            <p>Sau khi xóa, dữ liệu biến mất vĩnh viễn. Chỉ có thể khôi phục từ file backup đã lưu trước đó (nếu có).</p>
+            <p><b>Khuyến nghị:</b> Luôn chọn "📥 Có, lưu backup" trước khi xóa toàn bộ.</p>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- === ⑩ CACHE OCR === -->
+    <div class="g-acc" id="sec-10" data-keywords="cache ocr indexeddb idb xóa cache test ảnh cũ kẹt">
+      <button class="g-acc-head" onclick="toggleSection('sec-10')">
+        <span class="g-acc-num">10</span>
+        <span class="g-acc-title">Cache quét ảnh</span>
+        <span class="g-acc-arrow">›</span>
+      </button>
+      <div class="g-acc-body">
+        <div class="g-acc-content">
+
+          <h3 class="g-h3">💾 Cache là gì?</h3>
+          <p class="g-p">App lưu kết quả quét của mỗi ảnh trong bộ nhớ đệm. Ảnh quét lại → trả kết quả cache, <b>không quét lại</b> → nhanh hơn.</p>
+
+          <h3 class="g-h3">🗑️ Khi nào cần xóa cache?</h3>
+          <ul class="g-list">
+            <li><b>Test lại ảnh đã quét</b> — bắt buộc xóa để app chạy quét mới</li>
+            <li>Nghi kết quả bị "kẹt" từ lần quét trước</li>
+            <li>Sau khi update version mới</li>
+          </ul>
+
+          <h3 class="g-h3">📍 Cách xóa</h3>
+          <p class="g-p">Menu ☰ → <b>Sao lưu & Cloud</b> → kéo xuống mục <b>📷 Dữ liệu quét ảnh tạm</b> → bấm <b>🗑️ Xóa cache quét ảnh</b></p>
+
+          <h3 class="g-h3">📊 Xem thống kê</h3>
+          <p class="g-p">Ngay dưới nút xóa có dòng stats:</p>
+          <pre class="g-code">RAM: 0 · IDB: 0 · ~0 KB (max 200/8192KB)</pre>
+
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /group 3 -->
+  
+  <!-- ============ NHÓM 4: XỬ LÝ SỰ CỐ ============ -->
+  <div class="g-group">
+    <div class="g-group-head">
+      🔧 Xử lý sự cố
+      <span class="count">1 mục</span>
+    </div>
+
+    <!-- === ⑪ CÁC LỖI THƯỜNG GẶP === -->
+    <div class="g-acc" id="sec-11" data-keywords="lỗi sự cố không cập nhật mất dữ liệu trùng bản ghi không thấy nút quét tab không nhận diện">
+      <button class="g-acc-head" onclick="toggleSection('sec-11')">
+        <span class="g-acc-num">11</span>
+        <span class="g-acc-title">Các lỗi thường gặp</span>
+        <span class="g-acc-arrow">›</span>
+      </button>
+      <div class="g-acc-body">
+        <div class="g-acc-content">
+
+          <h3 class="g-h3">🐛 Quét ảnh đọc sai số</h3>
+          <p class="g-p">Chụp lại ảnh <b>rõ nét hơn</b> (đủ sáng, không rung). Nếu vẫn sai → mở bảng kiểm tra → sửa tay số bị sai → Lưu.</p>
+
+          <h3 class="g-h3">🎯 Không nhận diện được tab</h3>
+          <p class="g-p">App hiện bảng <b>"Chọn loại đơn"</b>. Chọn <b>Giao / Lấy / Hoàn</b> thủ công (1 lần/ảnh). Ảnh sau nếu rõ sẽ tự nhận.</p>
+
+          <h3 class="g-h3">🔄 App không cập nhật bản mới</h3>
+          <ol class="g-olist">
+            <li>Menu ☰ → <b>🔄 Kiểm tra cập nhật</b></li>
+            <li>Có banner <b>"🎉 Có bản mới"</b> → bấm <b>Cập nhật</b></li>
+            <li>Nếu vẫn cũ → gỡ app → cài lại</li>
+          </ol>
+
+          <h3 class="g-h3">💥 Mất dữ liệu</h3>
+          <p class="g-p">Menu ☰ → <b>Sao lưu & Cloud</b> → <b>⬇️ Khôi phục từ Cloud</b> (nếu đã setup) hoặc <b>🔄 Phục hồi tự động</b> (từ vault).</p>
+
+          <h3 class="g-h3">⚠️ Báo "Đã tồn tại bản ghi cùng số liệu"</h3>
+          <p class="g-p">Ngày đó đã nhập rồi. Muốn sửa → vào <b>Nhật ký</b> → bấm <b>Sửa</b>.</p>
+
+          <h3 class="g-h3">📷 Không thấy nút quét</h3>
+          <p class="g-p">Đóng app hoàn toàn → mở lại.</p>
+
+          <h3 class="g-h3">💾 Không lưu được dữ liệu</h3>
+          <p class="g-p">Bộ nhớ thiết bị đầy. Xuất file backup → xóa bớt dữ liệu cũ → thử lại.</p>
+
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /group 4 -->
+
+  <!-- ============ EMPTY STATE ============ -->
+  <div class="g-empty" id="gEmpty">
+    🔍 Không tìm thấy mục nào khớp<br>
+    <span style="font-size:12px">Thử từ khóa khác: quét ảnh, sao lưu, lương, hạng...</span>
+  </div>
+
+  <!-- ============ FOOTER ============ -->
+  <footer class="g-footer">
+    <div class="g-footer-text">
+      <b>SPX Tracker v2.8</b><br>
+      Made with ❤️ for SPX drivers
+    </div>
+    <a href="./index.html" class="g-footer-btn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="19" y1="12" x2="5" y2="12"/>
+        <polyline points="12 19 5 12 12 5"/>
+      </svg>
+      <span>Quay lại app</span>
+    </a>
+  </footer>
+
+</div><!-- /g-shell -->
+
+<div id="gLightbox" onclick="closeLightbox()">
+  <button class="g-lb-close" onclick="closeLightbox()" aria-label="Đóng">✕</button>
+  <img id="gLightboxImg" alt="Ảnh phóng to" onclick="event.stopPropagation()">
+</div>
+
+<script>
+// ============ THEME INIT ============
+(function() {
+  try {
+    const theme = localStorage.getItem('spx_theme') || 'light';
+    document.documentElement.setAttribute('data-theme', theme);
+  } catch (e) {
+    document.documentElement.setAttribute('data-theme', 'light');
+  }
+})();
+
+// ============ TOGGLE SECTION (ACCORDION) ============
+function toggleSection(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.toggle('open');
+}
+
+// ============ OPEN SECTION (từ Quick Start) ============
+function openSection(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.add('open');
+  setTimeout(() => {
+    const top = el.getBoundingClientRect().top + window.scrollY - 80;
+    window.scrollTo({ top, behavior: 'smooth' });
+  }, 100);
+}
+
+// ============ SEARCH TOGGLE ============
+function toggleSearch() {
+  const wrap = document.getElementById('gSearchWrap');
+  const btn = document.getElementById('gSearchToggle');
+  if (!wrap || !btn) return;
+
+  const isActive = wrap.classList.toggle('active');
+  btn.classList.toggle('active', isActive);
+
+  if (isActive) {
+    setTimeout(() => document.getElementById('gSearchInput')?.focus(), 200);
+  } else {
+    clearSearch();
+  }
+}
+
+// ============ FILTER SECTIONS ============
+function filterSections(query) {
+  const q = (query || '').trim().toLowerCase();
+  const clearBtn = document.getElementById('gSearchClear');
+  const emptyEl = document.getElementById('gEmpty');
+  const quickEl = document.getElementById('quickStart');
+
+  if (clearBtn) clearBtn.classList.toggle('show', q.length > 0);
+
+  // Quick Start ẩn khi đang search
+  if (quickEl) quickEl.style.display = q ? 'none' : '';
+
+  const sections = document.querySelectorAll('.g-acc');
+  const groups = document.querySelectorAll('.g-group');
+  let visibleCount = 0;
+
+  sections.forEach(sec => {
+    const keywords = (sec.dataset.keywords || '').toLowerCase();
+    const title = (sec.querySelector('.g-acc-title')?.innerText || '').toLowerCase();
+    const content = (sec.querySelector('.g-acc-content')?.innerText || '').toLowerCase();
+    const match = !q || keywords.includes(q) || title.includes(q) || content.includes(q);
+
+    sec.style.display = match ? '' : 'none';
+    if (match) visibleCount++;
+
+    // Auto-mở section khi đang search
+    if (q && match) sec.classList.add('open');
+    if (!q) sec.classList.remove('open');
+  });
+
+  // Ẩn group nếu tất cả section trong group đều bị ẩn
+  groups.forEach(grp => {
+    const visibleInGroup = grp.querySelectorAll('.g-acc:not([style*="display: none"])').length;
+    grp.style.display = visibleInGroup > 0 ? '' : 'none';
+  });
+
+  // Empty state
+  if (emptyEl) emptyEl.classList.toggle('show', q && visibleCount === 0);
+}
+
+// ============ CLEAR SEARCH ============
+function clearSearch() {
+  const input = document.getElementById('gSearchInput');
+  const clearBtn = document.getElementById('gSearchClear');
+  if (input) input.value = '';
+  if (clearBtn) clearBtn.classList.remove('show');
+
+  document.querySelectorAll('.g-acc').forEach(sec => {
+    sec.style.display = '';
+    sec.classList.remove('open');
+  });
+  document.querySelectorAll('.g-group').forEach(grp => grp.style.display = '');
+
+  const emptyEl = document.getElementById('gEmpty');
+  if (emptyEl) emptyEl.classList.remove('show');
+
+  const quickEl = document.getElementById('quickStart');
+  if (quickEl) quickEl.style.display = '';
+}
+
+// ============ LIGHTBOX ============
+function openLightbox(src) {
+  const lb = document.getElementById('gLightbox');
+  const img = document.getElementById('gLightboxImg');
+  if (!lb || !img) return;
+  img.src = src;
+  lb.classList.add('active');
+}
+function closeLightbox() {
+  const lb = document.getElementById('gLightbox');
+  if (lb) lb.classList.remove('active');
+}
+
+// ============ ESC = CLOSE SEARCH / LIGHTBOX ============
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  const lb = document.getElementById('gLightbox');
+  if (lb && lb.classList.contains('active')) { closeLightbox(); return; }
+  const wrap = document.getElementById('gSearchWrap');
+  if (wrap && wrap.classList.contains('active')) toggleSearch();
+});
+
+// ============ AUTO-OPEN SECTION TỪ HASH ============
+(function() {
+  const hash = window.location.hash;
+  if (hash && hash.startsWith('#sec-')) {
+    setTimeout(() => openSection(hash.slice(1)), 300);
+  }
+})();
+</script>
+
 </body>
-</html>
+                                                               </html>
