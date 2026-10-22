@@ -9,7 +9,6 @@
 <meta name="spx-app-version" content="v2.8">
 <meta name="description" content="Hướng dẫn sử dụng SPX Tracker">
 <title>Hướng dẫn — SPX Tracker</title>
-<!-- Font hệ thống: không chặn render và không phụ thuộc mạng. -->
 <style>
 :root {
   --bg: #f8fafc; --surface: #ffffff; --surface-2: #f1f5f9; --border: #e5e7eb;
@@ -19,8 +18,6 @@
   --warning: #d97706; --warning-bg: #fffbeb; --warning-bd: #fde68a;
   --danger: #dc2626; --danger-bg: #fef2f2; --danger-bd: #fecaca;
   --info: #2563eb; --info-bg: #eff6ff; --info-bd: #bfdbfe;
-  --new: #10b981; --new-bg: #ecfdf5; --new-bd: #a7f3d0;
-  --hot: #ef4444; --hot-bg: #fef2f2; --hot-bd: #fecaca;
 }
 [data-theme="dark"] {
   --bg: #0d1117; --surface: #161b22; --surface-2: #21262d; --border: #30363d;
@@ -30,8 +27,6 @@
   --warning: #d29922; --warning-bg: rgba(210,153,34,0.12); --warning-bd: rgba(210,153,34,0.3);
   --danger: #f85149; --danger-bg: rgba(248,81,73,0.12); --danger-bd: rgba(248,81,73,0.3);
   --info: #58a6ff; --info-bg: rgba(88,166,255,0.12); --info-bd: rgba(88,166,255,0.3);
-  --new: #3fb950; --new-bg: rgba(63,185,80,0.12); --new-bd: rgba(63,185,80,0.3);
-  --hot: #f85149; --hot-bg: rgba(248,81,73,0.12); --hot-bd: rgba(248,81,73,0.3);
 }
 * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
 html { scroll-behavior: smooth; }
@@ -200,17 +195,6 @@ body {
   border-top: 1px solid var(--border);
   padding-top: 14px;
 }
-
-/* ============ BADGES ============ */
-.g-badge-new,
-.g-badge-hot {
-  display: inline-block; font-size: 9.5px; font-weight: 800;
-  padding: 2px 8px; border-radius: 4px; border: 1px solid;
-  letter-spacing: 0.5px; text-transform: uppercase;
-  line-height: 1.4;
-}
-.g-badge-new { color: var(--new); background: var(--new-bg); border-color: var(--new-bd); }
-.g-badge-hot { color: var(--hot); background: var(--hot-bg); border-color: var(--hot-bd); }
 
 /* ============ CONTENT IN SECTION ============ */
 .g-h3 {
@@ -447,7 +431,7 @@ body {
   <div class="g-acc" id="sec-2" data-keywords="quét ảnh ocr chụp màn hình spx share gallery tab giao lấy hoàn tự nhận diện viền ô conf">
     <button class="g-acc-head" onclick="toggleSection('sec-2')">
       <span class="g-acc-num">2</span>
-      <span class="g-acc-title">Quét ảnh <span class="g-badge-hot">HOT</span></span>
+      <span class="g-acc-title">Quét ảnh</span>
       <span class="g-acc-arrow">›</span>
     </button>
     <div class="g-acc-body">
@@ -495,11 +479,11 @@ body {
     </div>
   </div>
 
-  <!-- === ③ TỰ LƯU OCR === -->
+  <!-- === ③ TỰ LƯU ẢNH QUÉT === -->
   <div class="g-acc" id="sec-3" data-keywords="tự lưu ocr toggle bật tắt tự động lưu điểm cao confidence">
     <button class="g-acc-head" onclick="toggleSection('sec-3')">
       <span class="g-acc-num">3</span>
-      <span class="g-acc-title">Tự lưu ảnh quét <span class="g-badge-new">MỚI</span></span>
+      <span class="g-acc-title">Tự lưu ảnh quét</span>
       <span class="g-acc-arrow">›</span>
     </button>
     <div class="g-acc-body">
@@ -591,7 +575,7 @@ body {
     <div class="g-acc" id="sec-5" data-keywords="lương lcb kc bưu cục khoảng cách tài xế rule 1500 công thu nhập miền hcm hà nội">
       <button class="g-acc-head" onclick="toggleSection('sec-5')">
         <span class="g-acc-num">5</span>
-        <span class="g-acc-title">Lương + Rule Tài xế <span class="g-badge-hot">HOT</span></span>
+        <span class="g-acc-title">Lương + Rule Tài xế</span>
         <span class="g-acc-arrow">›</span>
       </button>
       <div class="g-acc-body">
@@ -702,7 +686,7 @@ VD: Gốc 1.100, hạng Vàng (+20%)
     <div class="g-acc" id="sec-7" data-keywords="backup cloud gist github token khôi phục đồng bộ sao lưu json export import file">
       <button class="g-acc-head" onclick="toggleSection('sec-7')">
         <span class="g-acc-num">7</span>
-        <span class="g-acc-title">Sao lưu Cloud (Gist) <span class="g-badge-hot">HOT</span></span>
+        <span class="g-acc-title">Sao lưu Cloud (Gist)</span>
         <span class="g-acc-arrow">›</span>
       </button>
       <div class="g-acc-body">
@@ -748,7 +732,7 @@ VD: Gốc 1.100, hạng Vàng (+20%)
     <div class="g-acc" id="sec-8" data-keywords="auto backup 7 ngày tự động nhắc định kỳ lưu file downloads">
       <button class="g-acc-head" onclick="toggleSection('sec-8')">
         <span class="g-acc-num">8</span>
-        <span class="g-acc-title">Auto backup 7 ngày <span class="g-badge-new">MỚI</span></span>
+        <span class="g-acc-title">Auto backup 7 ngày</span>
         <span class="g-acc-arrow">›</span>
       </button>
       <div class="g-acc-body">
@@ -787,7 +771,7 @@ VD: Gốc 1.100, hạng Vàng (+20%)
     <div class="g-acc" id="sec-9" data-keywords="xóa nhật ký toàn bộ lưu backup trước khi xóa hoàn tác">
       <button class="g-acc-head" onclick="toggleSection('sec-9')">
         <span class="g-acc-num">9</span>
-        <span class="g-acc-title">Xóa Nhật ký <span class="g-badge-new">MỚI</span></span>
+        <span class="g-acc-title">Xóa Nhật ký</span>
         <span class="g-acc-arrow">›</span>
       </button>
       <div class="g-acc-body">
@@ -1075,4 +1059,4 @@ document.addEventListener('keydown', e => {
 </script>
 
 </body>
-                                                               </html>
+</html>
