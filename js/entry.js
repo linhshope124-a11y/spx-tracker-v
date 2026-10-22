@@ -3,7 +3,7 @@ import { WEIGHT_KEYS, WEIGHT_SUFFIXES } from './config.js';
 import { sanitizeInt, generateId, getTodayIso, getCurrentMonthIso, formatDateDisplay, deepClone, isValidIsoDate } from './utils.js';
 import { closeModal, showToast } from './ui.js';
 import { updateAllViews } from './render.js';
-import { hasBatchPending, backToBatch, completeActiveBatchItem } from './ocr.js';
+import { hasBatchPending, backToBatch, completeActiveBatchItem } from './ocr/index.js';
 import { showAlert, showConfirm, showChoice } from './dialog.js';
 import { downloadBackupFile } from './backup.js';
 
