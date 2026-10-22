@@ -5,7 +5,7 @@
 // ⚠️ MỖI LẦN SỬA FILE TRONG CORE → BUMP CACHE VERSION
 // =============================================================
 
-const CACHE       = 'spx-tracker-v2.7';    // v2.6 (Cập nhật cấu trúc OCR)
+const CACHE       = 'spx-tracker-v2.6';    // v2.6 (Cập nhật cấu trúc OCR)
 const TESS_CACHE  = 'spx-tesseract-v1';    // giữ nguyên — Tesseract không đổi
 const SHARE_CACHE = 'spx-shared-files';    // giữ nguyên — dữ liệu tạm
 
